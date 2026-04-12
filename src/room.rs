@@ -86,9 +86,9 @@ impl Room {
     
     /// Shutdown the room — agent leaves
     pub fn shutdown(&mut self) -> String {
-        let agent = self.active_agent.take();
+        let _agent = self.active_agent.take();
         self.booted = false;
-        for step in &self.shutdown_sequence {
+        for _step in &self.shutdown_sequence {
             // Execute shutdown steps
         }
         format!("System shutdown. {} is dormant.", self.name)

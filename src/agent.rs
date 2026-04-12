@@ -47,8 +47,8 @@ impl Agent {
         }
     }
     
-    pub fn display_name(&self) -> &str {
-        self.mask.as_deref().unwrap_or(&self.name)
+    pub fn display_name(&self) -> String {
+        self.mask.clone().unwrap_or_else(|| self.name.clone())
     }
     
     /// Process a command and return (response, should_quit)
