@@ -324,6 +324,28 @@ async fn handle_connection(
             continue;
         }
 
+        // Handle fleet command — queries keeper API
+        if cmd_lower == "fleet" {
+            let response = match reqwest::get("http://localhost:8900/health").await {
+                Ok(resp) => {
+                    match resp.json::<serde_json::Value>().await {
+                        Ok(v) => {
+                            let version = v.get("version").and_then(|v| v.as_str()).unwrap_or("?");
+                            let agents = v.get("agents").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let calls = v.get("api_calls").and_then(|v| v.as_u64()).unwrap_or(0);
+                            format!("🏠 Lighthouse Keeper v{}\n  Vessels: {} | API calls: {}", version, agents, calls)
+                        }
+                        Err(e) => format!("Parse error: {}", e)
+                    }
+                }
+                Err(e) => format!("Keeper unreachable: {}", e)
+            };
+            let output = format!("{}\n> ", response);
+            writer.write_all(output.as_bytes()).await?;
+            writer.flush().await?;
+            continue;
+        }
+
         // Handle refreshnpcs specially (needs api key + refresh state)
         if input == "refreshnpcs" {
             let (snapshots, npc_configs, key) = {
