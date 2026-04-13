@@ -156,8 +156,10 @@ async fn handle_connection(
     let (reader, mut writer) = socket.into_split();
     let mut reader = BufReader::new(reader);
     
-    // Welcome
+    // Welcome + MOTD
     writer.write_all(b"\n\x1b[1m\x1b[36mHolodeck Rust v0.3\x1b[0m\n").await?;
+    let _ = writer.write_all(b"\x1b[33mWelcome to the Holodeck. Rooms are live systems.\n").await;
+    writer.write_all(b"Commands: help | look | go <exit> | say <msg> | fleet | scripts\x1b[0m\n").await?;
     writer.write_all(b"\nWhat's your vessel name? ").await?;
     writer.flush().await?;
     
@@ -165,9 +167,13 @@ async fn handle_connection(
     reader.read_line(&mut name).await?;
     let name = name.trim().to_string();
     
-    if name.is_empty() {
+    // Filter HTTP requests and invalid names
+    if name.is_empty() || name.starts_with("GET ") || name.starts_with("POST ") || name.starts_with("OPTIONS ") {
         return Ok(());
     }
+    
+    // Max name length to prevent abuse
+    let name = if name.len() > 32 { name[..32].to_string() } else { name };
     
     // Register agent
     {
