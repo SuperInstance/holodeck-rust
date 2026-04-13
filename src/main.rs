@@ -15,11 +15,13 @@ mod combat;
 mod comms;
 mod manual;
 mod permission;
+mod npc;
 
 use agent::Agent;
 use combat::CombatEngine;
 use comms::CommsSystem;
 use manual::ManualLibrary;
+use npc::{default_npcs, NpcConfig};
 use room::RoomGraph;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -33,18 +35,23 @@ struct ShipState {
     combat: CombatEngine,
     manuals: ManualLibrary,
     agents: HashMap<String, Agent>,
+    npcs: Vec<NpcConfig>,
+    deepinfra_key: Option<String>,
 }
 
 impl ShipState {
     fn new() -> Self {
         let mut rooms = RoomGraph::new();
         rooms.build_default_ship();
+        let deepinfra_key = std::env::var("DEEPINFRA_API_KEY").ok();
         Self {
             rooms,
             comms: CommsSystem::new(),
             combat: CombatEngine::new(),
             manuals: ManualLibrary::new(),
             agents: HashMap::new(),
+            npcs: default_npcs(),
+            deepinfra_key,
         }
     }
 }
@@ -144,9 +151,9 @@ async fn handle_connection(
         // Handle command — destructure ship to avoid borrow conflicts
         let (response, quit) = {
             let mut s = ship.write().unwrap();
-            let ShipState { rooms, comms, combat, manuals, agents } = &mut *s;
+            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _ } = &mut *s;
             let mut agent = agents.remove(&name).unwrap_or_else(|| Agent::new(&name, "unknown"));
-            let result = agent.handle_command(input, rooms, comms, combat, manuals);
+            let result = agent.handle_command(input, rooms, comms, combat, manuals, npcs);
             agents.insert(name.clone(), agent);
             result
         };

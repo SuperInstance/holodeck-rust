@@ -34,6 +34,7 @@ impl Agent {
         comms: &mut CommsSystem,
         combat: &mut CombatEngine,
         manuals: &mut ManualLibrary,
+        npcs: &[crate::npc::NpcConfig],
     ) -> (String, bool) {
         let parts: Vec<&str> = input.splitn(2, ' ').collect();
         let cmd = parts[0].to_lowercase();
@@ -57,6 +58,7 @@ impl Agent {
             "sim" => (self.cmd_sim_mode(rooms), false),
             "real" => (self.cmd_real_mode(rooms), false),
             "manual"            => (self.cmd_manual(manuals), false),
+            "npc" | "talk" => (self.cmd_list_npcs(npcs, rooms), false),
             "feedback" => (self.cmd_feedback(args, manuals), false),
             "script" => (self.cmd_add_script(args, combat), false),
             "permission" | "perms" => (format!("Your permission level: {}", self.permission.name()), false),
@@ -298,6 +300,19 @@ impl Agent {
         "Fair winds.".to_string()
     }
 
+    fn cmd_list_npcs(&self, npcs: &[crate::npc::NpcConfig], rooms: &RoomGraph) -> String {
+        let room_npcs: Vec<_> = npcs.iter().filter(|n| n.room_id == self.room_id).collect();
+        if room_npcs.is_empty() {
+            return "No NPCs here.".to_string();
+        }
+        let mut lines = vec!["NPCs in this room:".to_string()];
+        for npc in room_npcs {
+            lines.push(format!("  {} ({})", npc.name, npc.role));
+            lines.push(format!("    \"{}\"", npc.greeting));
+        }
+        lines.join("\n")
+    }
+
     fn cmd_help(&self) -> String {
         vec![
             "look (l)         — See current room",
@@ -318,6 +333,7 @@ impl Agent {
             "manual           — Read living manual",
             "feedback <1-5> m — Rate the manual",
             "script <desc>    — Add combat script",
+            "npc (talk)       — Talk to NPCs in room",
             "help (?)         — This help",
             "quit (q)         — Disconnect",
         ].join("\n")
