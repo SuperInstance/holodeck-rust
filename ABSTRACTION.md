@@ -4,12 +4,16 @@ writes_to: [1]
 floor: 1
 ceiling: 5
 compilers:
-  - name: cargo
-    from: 1
-    to: 0
-    locks: 0
+  - name: deepseek-chat
+    from: 4
+    to: 2
+    locks: 7
 reasoning: |
-  Holodeck Rust is a compiled native MUD engine. It operates at Plane 1
-  (compiled Rust) for maximum performance. It reads MUD configurations
-  from Plane 2-4 (bytecode, domain language, intent) and compiles to
-  native binaries. Never goes below Plane 1 — the OS handles hardware.
+  Holodeck-rust is the foundational MUD engine executing at Plane 1 (compiled native Rust).
+  It accepts high-level inputs from Domain Language (4), Structured IR (3), FLUX Bytecode (2),
+  and natural Intent (5), compiling down to native Rust for maximum performance and reliability
+  on edge systems. As the execution substrate, it writes only native code (1).
+
+  The compiler from Plane 4 (Domain Language) to Plane 2 (Bytecode) uses deepseek-chat
+  with 7 locks to achieve 82% compression and cross-model consistency. The VM layer at
+  Plane 2 then interprets bytecode that holodeck-rust can embed or execute.
