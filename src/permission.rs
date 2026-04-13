@@ -40,14 +40,14 @@ impl Permission {
     pub fn can_go(&self) -> bool { true }
     pub fn can_look(&self) -> bool { true }
     pub fn can_say(&self) -> bool { true }
-    pub fn can_tell(&self) -> bool { *self >= Permission::Crew }
-    pub fn can_yell(&self) -> bool { *self >= Permission::Officer }
-    pub fn can_gossip(&self) -> bool { *self >= Permission::Officer }
+    pub fn can_tell(&self) -> bool { true }
+    pub fn can_yell(&self) -> bool { *self >= Permission::Crew }
+    pub fn can_gossip(&self) -> bool { *self >= Permission::Crew }
     pub fn can_read_gauges(&self) -> bool { *self >= Permission::Crew }
-    pub fn can_write_notes(&self) -> bool { *self >= Permission::Officer }
+    pub fn can_write_notes(&self) -> bool { *self >= Permission::Crew }
     pub fn can_manage_agents(&self) -> bool { *self >= Permission::Captain }
-    pub fn can_set_alert(&self) -> bool { *self >= Permission::Captain }
+    pub fn can_set_alert(&self) -> bool { *self >= Permission::Crew }
     pub fn can_create_rooms(&self) -> bool { *self >= Permission::Commander }
-    pub fn can_run_combat(&self) -> bool { *self >= Permission::Commander }
+    pub fn can_run_combat(&self) -> bool { *self >= Permission::Crew }
     pub fn can_modify_ship(&self) -> bool { *self >= Permission::Architect }
 }

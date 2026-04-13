@@ -185,7 +185,7 @@ impl RoomGraph {
         }
         if let Some(guard) = self.rooms.get_mut("guardian") {
             guard.add_gauge(Gauge::new("fleet_health", "%", 60.0, 40.0));
-            guard.add_gauge(Gauge::new("active_agents", "", 0.0, 0.0));
+            guard.add_gauge(Gauge::new("active_agents", "", 100.0, 100.0));
         }
     }
 }
