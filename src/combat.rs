@@ -95,7 +95,7 @@ impl CombatEngine {
 
         // Check each gauge for threshold breaches
         let mut max_alert = AlertLevel::Green;
-        for (_, gauge) in gauges {
+        for gauge in gauges.values() {
             let alert = match gauge.status() {
                 GaugeStatus::Red => {
                     tick.alerts.push(Alert {

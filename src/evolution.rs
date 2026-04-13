@@ -285,7 +285,7 @@ mod tests {
         gauges.insert("test_gauge".into(), g);
         room_gauges.insert("test-room".into(), gauges);
         
-        let mutations = evolver.evolve(&mut engine, &room_gauges);
+        let _mutations = evolver.evolve(&mut engine, &room_gauges);
         assert!(evolver.generation > 0);
     }
 

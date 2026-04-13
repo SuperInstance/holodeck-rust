@@ -60,7 +60,7 @@ impl LivingManual {
     pub fn add_feedback(&mut self, author: &str, rating: u8, comment: &str) {
         self.feedback.push(ManualFeedback {
             author: author.to_string(),
-            rating: rating.min(5).max(1),
+            rating: rating.clamp(1, 5),
             comment: comment.to_string(),
             timestamp: chrono::Utc::now().timestamp(),
         });

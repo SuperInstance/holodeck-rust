@@ -76,7 +76,7 @@ impl Room {
         out.push_str(&format!("{}\n{}\n", self.name, self.description));
 
         // Gauges
-        for (_, gauge) in &self.gauges {
+        for gauge in self.gauges.values() {
             out.push_str(&gauge.display());
             out.push('\n');
         }

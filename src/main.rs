@@ -106,7 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Tick combat for each room with gauges
                 let room_ids: Vec<String> = s.rooms.rooms.keys().cloned().collect();
                 for room_id in &room_ids {
-                    if let Some(room) = s.rooms.get_room(&room_id) {
+                    if let Some(room) = s.rooms.get_room(room_id) {
                         if !room.gauges.is_empty() {
                             let gauges = room.gauges.clone();
                             s.combat.tick(room_id, &gauges);
@@ -114,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 // Auto-evolve every 10 ticks
-                if s.combat.tick_count % 10 == 0 && s.combat.tick_count > 0 {
+                if s.combat.tick_count.is_multiple_of(10) && s.combat.tick_count > 0 {
                     let room_gauges: HashMap<String, HashMap<String, _>> = s.rooms.rooms.iter()
                         .map(|(id, room)| (id.clone(), room.gauges.clone()))
                         .collect();
@@ -348,7 +348,7 @@ async fn handle_connection(
                             else {
                                 ten_forward_chat.push((name.clone(), msg.clone()));
                                 if ten_forward_chat.len() > 50 { ten_forward_chat.drain(0..10); }
-                                format!("{}", name)
+                                name.to_string()
                             }
                         },
                         "chatlog" => {
@@ -436,16 +436,13 @@ async fn handle_connection(
             }; // read lock released
 
             let response = if let Some(api_key) = key {
-                match npc_refresh::refresh_npcs_async(npc_configs, &snapshots, &api_key).await {
-                    (new_npcs, cost, failures) => {
-                        let mut s = ship.write().unwrap();
-                        s.npcs = new_npcs;
-                        s.npc_refresh.refresh_count += 1;
-                        s.npc_refresh.total_cost += cost;
-                        s.npc_refresh.failures += failures;
-                        format!("Refreshed ${:.4} ({} failures). Talk with 'npc'.", cost, failures)
-                    }
-                }
+                let (new_npcs, cost, failures) = npc_refresh::refresh_npcs_async(npc_configs, &snapshots, &api_key).await;
+                let mut s = ship.write().unwrap();
+                s.npcs = new_npcs;
+                s.npc_refresh.refresh_count += 1;
+                s.npc_refresh.total_cost += cost;
+                s.npc_refresh.failures += failures;
+                format!("Refreshed ${:.4} ({} failures). Talk with 'npc'.", cost, failures)
             } else {
                 "No DEEPINFRA_API_KEY set.".to_string()
             };
