@@ -5,9 +5,8 @@
 //! master that reads the room and escalates when you're doing well,
 //! or throws you a lifeline when you're drowning.
 
-use crate::holodeck::{ActiveProgram, HolodeckProgram, EventAction, ProgramEvent};
+use crate::holodeck::{ActiveProgram, EventAction, ProgramEvent};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectorState {
@@ -117,6 +116,7 @@ impl DirectorState {
     }
 
     /// Parse the AI response into a ProgramEvent
+    #[allow(dead_code)]
     pub fn parse_response(&mut self, response: &str, current_tick: u64) -> Option<ProgramEvent> {
         let response = response.trim();
         self.last_event = response.to_string();

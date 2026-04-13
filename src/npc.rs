@@ -8,7 +8,6 @@
 //! Cost: ~$0.001 per NPC interaction
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NpcConfig {
@@ -20,6 +19,7 @@ pub struct NpcConfig {
     pub temperature: f32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NpcResponse {
     pub npc_name: String,
@@ -27,6 +27,7 @@ pub struct NpcResponse {
     pub cost: f64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuestStep {
     pub step: usize,
@@ -35,6 +36,7 @@ pub struct QuestStep {
     pub dialogue: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecomposedQuest {
     pub title: String,
@@ -107,6 +109,7 @@ pub fn default_npcs() -> Vec<NpcConfig> {
 /// Call DeepInfra API for NPC dialogue
 /// In production this would be async; for now it returns a prompt string
 /// that the caller can use with curl/HTTP client
+#[allow(dead_code)]
 pub fn build_npc_request(npc: &NpcConfig, player_name: &str, context: &str) -> serde_json::Value {
     serde_json::json!({
         "model": "ByteDance/Seed-2.0-mini",
@@ -120,6 +123,7 @@ pub fn build_npc_request(npc: &NpcConfig, player_name: &str, context: &str) -> s
 }
 
 /// Build quest decomposition request
+#[allow(dead_code)]
 pub fn build_quest_request(quest_outline: &str) -> serde_json::Value {
     serde_json::json!({
         "model": "ByteDance/Seed-2.0-mini",

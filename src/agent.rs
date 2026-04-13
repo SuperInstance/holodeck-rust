@@ -301,7 +301,7 @@ impl Agent {
         "Fair winds.".to_string()
     }
 
-    fn cmd_list_npcs(&self, npcs: &[crate::npc::NpcConfig], rooms: &RoomGraph) -> String {
+    fn cmd_list_npcs(&self, npcs: &[crate::npc::NpcConfig], _rooms: &RoomGraph) -> String {
         let room_npcs: Vec<_> = npcs.iter().filter(|n| n.room_id == self.room_id).collect();
         if room_npcs.is_empty() {
             return "No NPCs here.".to_string();

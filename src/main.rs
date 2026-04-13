@@ -59,7 +59,7 @@ impl ShipState {
         rooms.build_default_ship();
         let deepinfra_key = std::env::var("DEEPINFRA_API_KEY").ok();
         let mut combat = CombatEngine::new();
-        let mut evolver = evolution::ScriptEvolver::new();
+        let evolver = evolution::ScriptEvolver::new();
         evolution::ScriptEvolver::seed_defaults(&mut combat);
         Self {
             rooms,
@@ -243,8 +243,8 @@ async fn handle_connection(
                                 Some(ref mut prog) => {
                                     // If director is active, inject its event
                                     if let Some(ref dir) = ai_director {
-                                        let system_prompt = dir.system_prompt();
-                                        let state_prompt = dir.state_prompt(prog, agent_actions);
+                                        let _system_prompt = dir.system_prompt();
+                                        let _state_prompt = dir.state_prompt(prog, agent_actions);
                                         // We'll call the API async below
                                         // For now, just tick normally (director events added via 'directorevent' command)
                                     }
@@ -321,7 +321,7 @@ async fn handle_connection(
         if ["join", "deal", "hand", "flop", "turn", "river", "bet", "fold", "table", "chat", "chatlog"].contains(&cmd_lower.as_str()) {
             let response = {
                 let mut s = ship.write().unwrap();
-                let ShipState { poker, ten_forward_chat, agents, active_program, ai_director, agent_actions, .. } = &mut *s;
+                let ShipState { poker, ten_forward_chat, agents, active_program: _, ai_director: _, agent_actions: _, .. } = &mut *s;
                 let agent = agents.get(&name).unwrap();
                 let in_tf = agent.room_id == "ten-forward";
                 if !in_tf {

@@ -168,6 +168,7 @@ impl CommsSystem {
         }
     }
 
+    #[allow(dead_code)]
     pub fn room_messages(&self, room_id: &str, limit: usize) -> Vec<&Message> {
         self.history.iter()
             .filter(|m| m.target_room.as_deref() == Some(room_id) || matches!(m.channel, Channel::Yell | Channel::Gossip))

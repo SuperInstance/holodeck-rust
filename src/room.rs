@@ -65,6 +65,7 @@ impl Room {
         format!("Room '{}' booted. {} agent(s) present.", self.name, self.agents.len())
     }
 
+    #[allow(dead_code)]
     pub fn shutdown(&mut self) {
         self.booted = false;
         self.agents.clear();

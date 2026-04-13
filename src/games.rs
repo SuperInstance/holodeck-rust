@@ -188,6 +188,7 @@ impl PokerGame {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct StoryCircle {
     pub prompt: String,
@@ -195,7 +196,9 @@ pub struct StoryCircle {
     pub max_contributions: usize,
 }
 
+#[allow(dead_code)]
 impl StoryCircle {
+    #[allow(dead_code)]
     pub fn new(prompt: &str, max: usize) -> Self {
         Self {
             prompt: prompt.to_string(),
@@ -204,6 +207,7 @@ impl StoryCircle {
         }
     }
 
+    #[allow(dead_code)]
     pub fn contribute(&mut self, name: &str, text: &str) -> String {
         if self.contributions.len() >= self.max_contributions {
             return "Story circle is full. Read the story with 'story'.".to_string();
@@ -217,6 +221,7 @@ impl StoryCircle {
         }
     }
 
+    #[allow(dead_code)]
     pub fn read(&self) -> String {
         let mut lines = vec![format!("Prompt: {}", self.prompt), String::new()];
         for (name, text) in &self.contributions {

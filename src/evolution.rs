@@ -132,7 +132,7 @@ impl ScriptEvolver {
         let mut mutations = Vec::new();
 
         // 1. Cull scripts that haven't fired in 100 ticks
-        let tick_threshold = engine.tick_count.saturating_sub(100);
+        let _tick_threshold = engine.tick_count.saturating_sub(100);
         let before = engine.scripts.len();
         engine.scripts.retain(|s| {
             // Keep system scripts (gen 1) and recently useful ones

@@ -46,6 +46,7 @@ impl LivingManual {
         self.generations.last().map(|g| g.content.as_str()).unwrap_or("No manual yet.")
     }
 
+    #[allow(dead_code)]
     pub fn add_generation(&mut self, content: &str, author: &str) {
         let gen = self.current_gen() + 1;
         self.generations.push(ManualGeneration {
