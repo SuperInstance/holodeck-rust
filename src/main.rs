@@ -16,12 +16,14 @@ mod comms;
 mod manual;
 mod permission;
 mod npc;
+mod npc_refresh;
 
 use agent::Agent;
 use combat::CombatEngine;
 use comms::CommsSystem;
 use manual::ManualLibrary;
 use npc::{default_npcs, NpcConfig};
+use npc_refresh::NpcRefresh;
 use room::RoomGraph;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -37,6 +39,7 @@ struct ShipState {
     agents: HashMap<String, Agent>,
     npcs: Vec<NpcConfig>,
     deepinfra_key: Option<String>,
+    npc_refresh: NpcRefresh,
 }
 
 impl ShipState {
@@ -52,6 +55,7 @@ impl ShipState {
             agents: HashMap::new(),
             npcs: default_npcs(),
             deepinfra_key,
+            npc_refresh: NpcRefresh::new(),
         }
     }
 }
@@ -148,10 +152,56 @@ async fn handle_connection(
             continue;
         }
         
+        // Handle refreshnpcs specially (needs api key + refresh state)
+        if input == "refreshnpcs" {
+            let response = {
+                let s = ship.write().unwrap();
+                let ShipState { rooms, deepinfra_key, .. } = &*s;
+                // Snapshot gauge readings and NPC configs (release borrow before async)
+                let snapshots: Vec<(String, Vec<String>)> = rooms.rooms.iter().map(|(id, room)| {
+                    let readings: Vec<String> = room.gauges.values().map(|g| {
+                        format!("{}: {:.1}{}", g.name, g.value, g.unit)
+                    }).collect();
+                    (id.clone(), readings)
+                }).collect();
+                let npc_configs: Vec<NpcConfig> = s.npcs.clone();
+                let key = deepinfra_key.clone();
+                (snapshots, npc_configs, key)
+            }; // write lock released
+
+            let (snapshots, npc_configs, key) = response;
+            let response = if let Some(api_key) = key {
+                // Run blocking curl calls in background
+                let refreshed = tokio::task::spawn_blocking(move || {
+                    let mut refresh = NpcRefresh::new();
+                    let mut npcs = npc_configs;
+                    match refresh.refresh_all(&mut npcs, &snapshots, &api_key) {
+                        Ok(cost) => (npcs, format!("Refreshed ${:.4}, {} failures.", cost, refresh.failures)),
+                        Err(e) => (npcs, format!("Refresh failed: {}", e))
+                    }
+                }).await;
+                match refreshed {
+                    Ok((new_npcs, msg)) => {
+                        let mut s = ship.write().unwrap();
+                        s.npcs = new_npcs;
+                        s.npc_refresh.refresh_count += 1;
+                        msg
+                    }
+                    Err(e) => format!("Task error: {}", e)
+                }
+            } else {
+                "No DEEPINFRA_API_KEY set.".to_string()
+            };
+            let output = format!("{}\n> ", response);
+            writer.write_all(output.as_bytes()).await?;
+            writer.flush().await?;
+            continue;
+        }
+
         // Handle command — destructure ship to avoid borrow conflicts
         let (response, quit) = {
             let mut s = ship.write().unwrap();
-            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _ } = &mut *s;
+            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _, npc_refresh: _ } = &mut *s;
             let mut agent = agents.remove(&name).unwrap_or_else(|| Agent::new(&name, "unknown"));
             let result = agent.handle_command(input, rooms, comms, combat, manuals, npcs);
             agents.insert(name.clone(), agent);

@@ -59,6 +59,7 @@ impl Agent {
             "real" => (self.cmd_real_mode(rooms), false),
             "manual"            => (self.cmd_manual(manuals), false),
             "npc" | "talk" => (self.cmd_list_npcs(npcs, rooms), false),
+            "refresh" => ("Use 'refreshnpcs' to refresh NPC dialogue from Seed-2.0-Mini.".to_string(), false),
             "feedback" => (self.cmd_feedback(args, manuals), false),
             "script" => (self.cmd_add_script(args, combat), false),
             "permission" | "perms" => (format!("Your permission level: {}", self.permission.name()), false),
