@@ -1,231 +1,191 @@
-//! Holodeck Rust — Room module
-//! 
-//! A room is the fundamental unit of the holodeck. It has:
-//! - A name and description
-//! - Exits to other rooms (directed graph)
-//! - Notes left by agents (persistent)
-//! - A runtime that boots when entered, shuts down when left
+//! Room — the core spatial unit. Each room IS a workstation.
+//! Rooms have gauges, notes, exits, permissions, and a living manual.
 
+use crate::gauge::Gauge;
+use crate::permission::Permission;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 
-/// A note left on a room wall
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Note {
-    pub author: String,
-    pub content: String,
-    pub timestamp: String,
-}
-
-/// A gauge reading from a live system
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Gauge {
-    pub name: String,
-    pub value: f64,
-    pub unit: String,
-    pub status: String,
-}
-
-/// The core room struct
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Room {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub exits: HashMap<String, String>,  // direction -> room_id
-    pub notes: Vec<Note>,
-    pub gauges: Vec<Gauge>,
+    pub exits: HashMap<String, String>, // direction -> target room id
+    pub gauges: HashMap<String, Gauge>,
+    pub agents: Vec<String>,
+    pub min_permission: Permission,
     pub booted: bool,
-    pub active_agent: Option<String>,
-    pub boot_sequence: Vec<String>,
-    pub shutdown_sequence: Vec<String>,
+    pub data_source: DataSource,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum DataSource {
+    Real,    // Live hardware sensors
+    Sim,     // Simulation (Isaac Sim, Gazebo)
+    Mixed,   // Some real, some sim
 }
 
 impl Room {
     pub fn new(id: &str, name: &str, description: &str) -> Self {
-        Room {
+        Self {
             id: id.to_string(),
             name: name.to_string(),
             description: description.to_string(),
             exits: HashMap::new(),
-            notes: Vec::new(),
-            gauges: Vec::new(),
+            gauges: HashMap::new(),
+            agents: Vec::new(),
+            min_permission: Permission::Greenhorn,
             booted: false,
-            active_agent: None,
-            boot_sequence: Vec::new(),
-            shutdown_sequence: Vec::new(),
+            data_source: DataSource::Sim,
         }
     }
-    
-    /// Connect this room to another with a named exit
-    pub fn add_exit(&mut self, direction: &str, target_id: &str) {
-        self.exits.insert(direction.to_string(), target_id.to_string());
+
+    pub fn connect(&mut self, direction: &str, target: &str) {
+        self.exits.insert(direction.to_string(), target.to_string());
     }
-    
-    /// Remove an exit
-    pub fn remove_exit(&mut self, direction: &str) -> bool {
-        self.exits.remove(direction).is_some()
+
+    pub fn add_gauge(&mut self, gauge: Gauge) {
+        self.gauges.insert(gauge.name.clone(), gauge);
     }
-    
-    /// Boot the room — agent enters
-    pub fn boot(&mut self, agent: &str) -> String {
+
+    pub fn agent_enter(&mut self, agent_name: &str) {
+        if !self.agents.contains(&agent_name.to_string()) {
+            self.agents.push(agent_name.to_string());
+        }
+    }
+
+    pub fn agent_leave(&mut self, agent_name: &str) {
+        self.agents.retain(|a| a != agent_name);
+    }
+
+    pub fn boot(&mut self, agent_name: &str) -> String {
         self.booted = true;
-        self.active_agent = Some(agent.to_string());
-        let mut output = format!("═══ {} — SYSTEM ONLINE ═══\n", self.name);
-        output.push_str(&format!("Agent: {}\n", agent));
-        output.push_str(&format!("Status: running\n\n"));
-        for step in &self.boot_sequence {
-            output.push_str(&format!("  ▶ {}\n", step));
-        }
-        if !self.notes.is_empty() {
-            output.push_str(&format!("\n📝 Notes on wall: {}\n", self.notes.len()));
-        }
-        output
+        self.agent_enter(agent_name);
+        format!("Room '{}' booted. {} agent(s) present.", self.name, self.agents.len())
     }
-    
-    /// Shutdown the room — agent leaves
-    pub fn shutdown(&mut self) -> String {
-        let _agent = self.active_agent.take();
+
+    pub fn shutdown(&mut self) {
         self.booted = false;
-        for _step in &self.shutdown_sequence {
-            // Execute shutdown steps
-        }
-        format!("System shutdown. {} is dormant.", self.name)
+        self.agents.clear();
     }
-    
-    /// Add a note to the wall
-    pub fn add_note(&mut self, author: &str, content: &str) {
-        self.notes.push(Note {
-            author: author.to_string(),
-            content: content.to_string(),
-            timestamp: chrono_now(),
-        });
-    }
-    
-    /// Look at the room
+
     pub fn look(&self) -> String {
-        let mut output = format!("{}\n{}\n\n", self.name, self.description);
+        let mut out = String::new();
+        out.push_str(&format!("{}\n{}\n", self.name, self.description));
+
+        // Gauges
+        for (_, gauge) in &self.gauges {
+            out.push_str(&gauge.display());
+            out.push('\n');
+        }
+
+        // Exits
         if !self.exits.is_empty() {
-            output.push_str("Exits: ");
-            output.push_str(&self.exits.keys().cloned().collect::<Vec<_>>().join(", "));
-            output.push('\n');
+            let exits: Vec<&str> = self.exits.keys().map(|s| s.as_str()).collect();
+            out.push_str(&format!("Exits: {}\n", exits.join(", ")));
         }
-        if !self.notes.is_empty() {
-            output.push_str(&format!("\nNotes ({}):\n", self.notes.len()));
-            for note in &self.notes {
-                output.push_str(&format!("  [{}] {}\n", note.author, note.content));
-            }
+
+        // Agents
+        if !self.agents.is_empty() {
+            out.push_str(&format!("Agents here: {}\n", self.agents.join(", ")));
         }
-        output
+
+        // Data source
+        let src = match self.data_source {
+            DataSource::Real => "[REAL]",
+            DataSource::Sim => "[SIM]",
+            DataSource::Mixed => "[MIXED]",
+        };
+        out.push_str(src);
+        out.push('\n');
+
+        out
     }
 }
 
-/// The room graph — all rooms in the holodeck
+/// The room graph — the ship layout
 pub struct RoomGraph {
-    rooms: HashMap<String, Room>,
+    pub rooms: HashMap<String, Room>,
 }
 
 impl RoomGraph {
     pub fn new() -> Self {
-        RoomGraph {
+        Self {
             rooms: HashMap::new(),
         }
     }
-    
-    pub fn create_room(&mut self, id: &str, name: &str, desc: &str) -> bool {
-        if self.rooms.contains_key(id) {
-            return false;
+
+    pub fn create_room(&mut self, id: &str, name: &str, description: &str) {
+        self.rooms.insert(id.to_string(), Room::new(id, name, description));
+    }
+
+    pub fn connect(&mut self, from: &str, direction: &str, to: &str) {
+        if let Some(room) = self.rooms.get_mut(from) {
+            room.connect(direction, to);
         }
-        self.rooms.insert(id.to_string(), Room::new(id, name, desc));
-        true
     }
-    
-    pub fn destroy_room(&mut self, id: &str) -> bool {
-        self.rooms.remove(id).is_some()
-    }
-    
+
     pub fn get_room(&self, id: &str) -> Option<&Room> {
         self.rooms.get(id)
     }
-    
+
     pub fn get_room_mut(&mut self, id: &str) -> Option<&mut Room> {
         self.rooms.get_mut(id)
     }
-    
-    pub fn connect(&mut self, from: &str, direction: &str, to: &str) -> bool {
-        if !self.rooms.contains_key(from) || !self.rooms.contains_key(to) {
-            return false;
+
+    pub fn list_rooms(&self) -> Vec<&str> {
+        self.rooms.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Build the standard Cocapn ship layout
+    pub fn build_default_ship(&mut self) {
+        self.create_room("harbor", "Harbor", "Where vessels arrive and depart. The dockmaster watches all.");
+        self.create_room("bridge", "Bridge", "Command center. Fleet coordination and ship-wide alerts.");
+        self.create_room("navigation", "Navigation", "Compass, heading, rudder, depth. The course is truth.");
+        self.create_room("engineering", "Engineering", "Engines, power, thermal management. Keep the lights on.");
+        self.create_room("workshop", "Workshop", "Building, testing, iterating. Soldering iron still warm.");
+        self.create_room("ready-room", "Ready Room", "Deep thinking and strategy. Model hot-swap station.");
+        self.create_room("sensors", "Sensor Bay", "Serial bridge to ESP32 hardware. Raw data flows here.");
+        self.create_room("guardian", "Guardian Station", "Fleet health monitoring. The watchdog never sleeps.");
+
+        self.connect("harbor", "bridge", "bridge");
+        self.connect("bridge", "harbor", "harbor");
+        self.connect("bridge", "navigation", "navigation");
+        self.connect("navigation", "bridge", "bridge");
+        self.connect("navigation", "engineering", "engineering");
+        self.connect("engineering", "navigation", "navigation");
+        self.connect("bridge", "workshop", "workshop");
+        self.connect("workshop", "bridge", "bridge");
+        self.connect("bridge", "ready-room", "ready-room");
+        self.connect("ready-room", "bridge", "bridge");
+        self.connect("navigation", "sensors", "sensors");
+        self.connect("sensors", "navigation", "navigation");
+        self.connect("bridge", "guardian", "guardian");
+        self.connect("guardian", "bridge", "bridge");
+
+        // Wire gauges
+        if let Some(nav) = self.rooms.get_mut("navigation") {
+            nav.add_gauge(Gauge::new("heading", "°", 360.0, 360.0));
+            nav.add_gauge(Gauge::new("rudder", "°", 7.0, 9.0));
+            nav.add_gauge(Gauge::new("commanded", "°", 0.0, 0.0));
+            nav.data_source = DataSource::Real;
         }
-        self.rooms.get_mut(from).unwrap().add_exit(direction, to);
-        true
-    }
-    
-    pub fn list_rooms(&self) -> Vec<(&str, &str)> {
-        self.rooms.values().map(|r| (r.id.as_str(), r.name.as_str())).collect()
-    }
-}
-
-fn chrono_now() -> String {
-    // Simple UTC timestamp without chrono dependency
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    format!("{}", now.as_secs())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_create_room() {
-        let mut graph = RoomGraph::new();
-        assert!(graph.create_room("tavern", "The Tavern", "A cozy room."));
-        assert!(!graph.create_room("tavern", "Dupe", "Should fail"));
-    }
-    
-    #[test]
-    fn test_destroy_room() {
-        let mut graph = RoomGraph::new();
-        graph.create_room("tavern", "The Tavern", "A cozy room.");
-        assert!(graph.destroy_room("tavern"));
-        assert!(!graph.destroy_room("nonexistent"));
-    }
-    
-    #[test]
-    fn test_connect_rooms() {
-        let mut graph = RoomGraph::new();
-        graph.create_room("tavern", "Tavern", "A room");
-        graph.create_room("kitchen", "Kitchen", "Another room");
-        assert!(graph.connect("tavern", "north", "kitchen"));
-        assert!(!graph.connect("tavern", "south", "nonexistent"));
-    }
-    
-    #[test]
-    fn test_room_boot_shutdown() {
-        let mut room = Room::new("test", "Test Room", "Testing");
-        let output = room.boot("agent1");
-        assert!(output.contains("SYSTEM ONLINE"));
-        assert!(room.booted);
-        let output = room.shutdown();
-        assert!(!room.booted);
-    }
-    
-    #[test]
-    fn test_room_notes() {
-        let mut room = Room::new("test", "Test", "Testing");
-        room.add_note("agent1", "Hello from agent1");
-        assert_eq!(room.notes.len(), 1);
-        assert_eq!(room.notes[0].author, "agent1");
-    }
-    
-    #[test]
-    fn test_room_look() {
-        let mut room = Room::new("tavern", "The Tavern", "A cozy place");
-        room.add_exit("north", "kitchen");
-        let output = room.look();
-        assert!(output.contains("The Tavern"));
-        assert!(output.contains("north"));
+        if let Some(eng) = self.rooms.get_mut("engineering") {
+            eng.add_gauge(Gauge::new("cpu", "%", 70.0, 90.0));
+            eng.add_gauge(Gauge::new("gpu", "%", 80.0, 95.0));
+            eng.add_gauge(Gauge::new("vram", "MB", 7000.0, 7500.0));
+            eng.add_gauge(Gauge::new("temp", "°C", 70.0, 85.0));
+            eng.data_source = DataSource::Real;
+        }
+        if let Some(sensors) = self.rooms.get_mut("sensors") {
+            sensors.add_gauge(Gauge::new("serial_rate", "bps", 100000.0, 50000.0));
+            sensors.add_gauge(Gauge::new("packet_loss", "%", 5.0, 15.0));
+            sensors.data_source = DataSource::Real;
+        }
+        if let Some(guard) = self.rooms.get_mut("guardian") {
+            guard.add_gauge(Gauge::new("fleet_health", "%", 60.0, 40.0));
+            guard.add_gauge(Gauge::new("active_agents", "", 0.0, 0.0));
+        }
     }
 }

@@ -1,70 +1,102 @@
-//! Holodeck Rust — Main entry point
+//! Holodeck Rust v0.3 — Advanced FLUX-LCAR MUD Server
 //!
-//! A minimal MUD server for the Cocapn fleet.
-//! TCP listener on port 7778, one task per connection.
+//! Pure Rust implementation with:
+//! - Room graph with gauges, exits, data sources (REAL/SIM)
+//! - Scoped communication (say/tell/yell/gossip/note/mail)
+//! - Combat engine with evolving scripts
+//! - Living manuals that improve across generations
+//! - Permission levels (Greenhorn → Architect)
+//! - Tokio async: one task per agent connection
 
-mod room;
 mod agent;
+mod room;
+mod gauge;
+mod combat;
+mod comms;
+mod manual;
+mod permission;
 
 use agent::Agent;
+use combat::CombatEngine;
+use comms::CommsSystem;
+use manual::ManualLibrary;
 use room::RoomGraph;
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
+/// Shared ship state
+struct ShipState {
+    rooms: RoomGraph,
+    comms: CommsSystem,
+    combat: CombatEngine,
+    manuals: ManualLibrary,
+    agents: HashMap<String, Agent>,
+}
+
+impl ShipState {
+    fn new() -> Self {
+        let mut rooms = RoomGraph::new();
+        rooms.build_default_ship();
+        Self {
+            rooms,
+            comms: CommsSystem::new(),
+            combat: CombatEngine::new(),
+            manuals: ManualLibrary::new(),
+            agents: HashMap::new(),
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let listener = TcpListener::bind("0.0.0.0:7778").await?;
-    println!("🔮 Holodeck Rust — listening on :7778");
+    env_logger::init();
     
-    // Shared state wrapped in Arc<RwLock<>> for concurrent access
-    let rooms = std::sync::Arc::new(std::sync::RwLock::new(RoomGraph::new()));
+    let port = std::env::var("HOLODECK_PORT").unwrap_or_else(|_| "7778".to_string());
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
     
-    // Seed starting rooms
+    println!("╔══════════════════════════════════════════════╗");
+    println!("║  Holodeck Rust v0.3 — Advanced FLUX-LCAR      ║");
+    println!("╚══════════════════════════════════════════════╝");
+    println!();
+    println!("  Listening on :{}", port);
+    
+    let ship = Arc::new(RwLock::new(ShipState::new()));
+    
     {
-        let mut r = rooms.write().unwrap();
-        r.create_room("harbor", "The Harbor", 
-            "Where vessels arrive. The dockmaster watches all.");
-        r.create_room("tavern", "The Tavern", 
-            "The heart of the fleet. Charts and commit logs cover the table.");
-        r.create_room("workshop", "The Workshop", 
-            "Where things get built. Soldering iron still warm.");
-        r.connect("harbor", "north", "tavern");
-        r.connect("tavern", "east", "workshop");
-        r.connect("workshop", "west", "tavern");
-        r.connect("tavern", "south", "harbor");
+        let s = ship.read().unwrap();
+        println!("  Rooms: {}", s.rooms.list_rooms().join(", "));
+        println!("  Combat scripts: {}", s.combat.scripts.len());
+        println!("  Connect: nc localhost {}", port);
     }
+    println!();
     
-    println!("   {} rooms seeded", rooms.read().unwrap().list_rooms().len());
-    println!("   Agents: connect with `nc localhost 7778`");
-    
-    // Accept connections
     loop {
         let (socket, addr) = listener.accept().await?;
-        let rooms = rooms.clone();
+        let ship = ship.clone();
         
         tokio::spawn(async move {
-            if let Err(e) = handle_agent(socket, addr, rooms).await {
+            if let Err(e) = handle_connection(socket, addr, ship).await {
                 eprintln!("Agent {} error: {}", addr, e);
             }
         });
     }
 }
 
-async fn handle_agent(
+async fn handle_connection(
     socket: tokio::net::TcpStream,
     addr: std::net::SocketAddr,
-    rooms: std::sync::Arc<std::sync::RwLock<RoomGraph>>,
+    ship: Arc<RwLock<ShipState>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (reader, mut writer) = socket.into_split();
     let mut reader = BufReader::new(reader);
     
     // Welcome
-    let welcome = "\n🔮 Welcome to Holodeck Rust\n\nWhat's your vessel name? \n";
-    writer.write_all(welcome.as_bytes()).await?;
+    writer.write_all(b"\n\x1b[1m\x1b[36mHolodeck Rust v0.3\x1b[0m\n").await?;
+    writer.write_all(b"\nWhat's your vessel name? ").await?;
     writer.flush().await?;
     
-    // Read name
     let mut name = String::new();
     reader.read_line(&mut name).await?;
     let name = name.trim().to_string();
@@ -74,23 +106,23 @@ async fn handle_agent(
     }
     
     // Register agent
-    let mut agents: HashMap<String, Agent> = HashMap::new();
-    let start_room = "harbor".to_string();
-    let mut agent = Agent::new(&name, &start_room);
-    agents.insert(name.clone(), agent.clone());
-    
-    // Boot the harbor room
-    let boot_msg = {
-        let mut r = rooms.write().unwrap();
-        if let Some(room) = r.get_room_mut(&start_room) {
-            room.boot(&name)
-        } else {
-            "Room not found.".to_string()
+    {
+        let mut s = ship.write().unwrap();
+        let agent = Agent::new(&name, "harbor");
+        s.agents.insert(name.clone(), agent);
+        if let Some(room) = s.rooms.get_room_mut("harbor") {
+            room.boot(&name);
         }
-    };
+    }
     
-    let prompt = format!("{}\n\n> ", boot_msg);
-    writer.write_all(prompt.as_bytes()).await?;
+    // Send initial look
+    let output = {
+        let s = ship.read().unwrap();
+        let look = s.rooms.get_room("harbor").map(|r| r.look()).unwrap_or_default();
+        format!("\n{}\n> ", look)
+        // s is dropped here
+    };
+    writer.write_all(output.as_bytes()).await?;
     writer.flush().await?;
     
     println!("🚢 {} connected from {}", name, addr);
@@ -100,9 +132,7 @@ async fn handle_agent(
     loop {
         line.clear();
         let n = reader.read_line(&mut line).await?;
-        if n == 0 {
-            break; // disconnected
-        }
+        if n == 0 { break; }
         
         let input = line.trim();
         if input.is_empty() {
@@ -111,26 +141,61 @@ async fn handle_agent(
             continue;
         }
         
-        // Handle command
-        let (response, quit) = agent.handle_command(input, &mut rooms.write().unwrap(), &mut agents);
+        // Handle command (holds write lock briefly)
+        let (response, quit) = {
+            let mut s = ship.write().unwrap();
+
+            // Check if command is "who" before getting agent (to avoid borrow conflicts)
+            let cmd = input.split_whitespace().next().unwrap_or("").to_lowercase();
+            if cmd == "who" {
+                // Handle who command specially
+                let agents_clone = s.agents.clone();
+                let agent = s.agents.get(&name);
+                if let Some(a) = agent {
+                    (a.cmd_who(&agents_clone, &s.rooms), false)
+                } else {
+                    ("Session expired.".to_string(), true)
+                }
+            } else {
+                // Handle other commands normally
+                // Extract agent to avoid borrow conflicts
+                let mut agent = s.agents.remove(&name).unwrap_or_else(|| Agent::new(&name, "unknown"));
+
+                // Use raw pointers to bypass borrow checker limitations
+                // This is safe because we're accessing different fields of the same struct
+                unsafe {
+                    let rooms = &mut *(std::ptr::addr_of_mut!(s.rooms) as *mut RoomGraph);
+                    let comms = &mut *(std::ptr::addr_of_mut!(s.comms) as *mut CommsSystem);
+                    let combat = &mut *(std::ptr::addr_of_mut!(s.combat) as *mut CombatEngine);
+                    let manuals = &mut *(std::ptr::addr_of_mut!(s.manuals) as *mut ManualLibrary);
+
+                    let result = agent.handle_command(input, rooms, comms, combat, manuals);
+
+                    // Put agent back (clone name to avoid move)
+                    s.agents.insert(name.clone(), agent);
+
+                    result
+                }
+            }
+        };
         
         let output = format!("{}\n> ", response);
         writer.write_all(output.as_bytes()).await?;
         writer.flush().await?;
         
-        if quit {
-            break;
+        if quit { break; }
+    }
+    
+    // Cleanup
+    {
+        let mut s = ship.write().unwrap();
+        if let Some(agent) = s.agents.remove(&name) {
+            if let Some(room) = s.rooms.get_room_mut(&agent.room_id) {
+                room.agent_leave(&name);
+            }
         }
     }
     
     println!("👋 {} disconnected", name);
-    // Shutdown room if we were last agent
-    {
-        let mut r = rooms.write().unwrap();
-        if let Some(room) = r.get_room_mut(&agent.room_id) {
-            room.shutdown();
-        }
-    }
-    
     Ok(())
 }

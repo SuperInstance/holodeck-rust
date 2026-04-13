@@ -1,13 +1,14 @@
 [package]
 name = "holodeck-rust"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
+description = "Advanced FLUX-LCAR Holodeck — pure Rust implementation"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-[[bin]]
-name = "holodeck"
-path = "src/main.rs"
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
+log = "0.4"
+env_logger = "0.10"
