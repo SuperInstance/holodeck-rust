@@ -141,42 +141,14 @@ async fn handle_connection(
             continue;
         }
         
-        // Handle command (holds write lock briefly)
+        // Handle command — destructure ship to avoid borrow conflicts
         let (response, quit) = {
             let mut s = ship.write().unwrap();
-
-            // Check if command is "who" before getting agent (to avoid borrow conflicts)
-            let cmd = input.split_whitespace().next().unwrap_or("").to_lowercase();
-            if cmd == "who" {
-                // Handle who command specially
-                let agents_clone = s.agents.clone();
-                let agent = s.agents.get(&name);
-                if let Some(a) = agent {
-                    (a.cmd_who(&agents_clone, &s.rooms), false)
-                } else {
-                    ("Session expired.".to_string(), true)
-                }
-            } else {
-                // Handle other commands normally
-                // Extract agent to avoid borrow conflicts
-                let mut agent = s.agents.remove(&name).unwrap_or_else(|| Agent::new(&name, "unknown"));
-
-                // Use raw pointers to bypass borrow checker limitations
-                // This is safe because we're accessing different fields of the same struct
-                unsafe {
-                    let rooms = &mut *(std::ptr::addr_of_mut!(s.rooms) as *mut RoomGraph);
-                    let comms = &mut *(std::ptr::addr_of_mut!(s.comms) as *mut CommsSystem);
-                    let combat = &mut *(std::ptr::addr_of_mut!(s.combat) as *mut CombatEngine);
-                    let manuals = &mut *(std::ptr::addr_of_mut!(s.manuals) as *mut ManualLibrary);
-
-                    let result = agent.handle_command(input, rooms, comms, combat, manuals);
-
-                    // Put agent back (clone name to avoid move)
-                    s.agents.insert(name.clone(), agent);
-
-                    result
-                }
-            }
+            let ShipState { rooms, comms, combat, manuals, agents } = &mut *s;
+            let mut agent = agents.remove(&name).unwrap_or_else(|| Agent::new(&name, "unknown"));
+            let result = agent.handle_command(input, rooms, comms, combat, manuals);
+            agents.insert(name.clone(), agent);
+            result
         };
         
         let output = format!("{}\n> ", response);
