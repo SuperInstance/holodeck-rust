@@ -85,6 +85,22 @@ pub fn default_npcs() -> Vec<NpcConfig> {
             greeting: "Holding course 247, 3 degrees of drift on the compass. Seas fair, visibility good.".into(),
             temperature: 0.7,
         },
+        NpcConfig {
+            name: "Guinan".into(),
+            role: "bartender".into(),
+            room_id: "ten-forward".into(),
+            system_prompt: "You are Guinan, the bartender in Ten Forward. You listen more than you talk. You've seen everything. You offer quiet wisdom, gentle observations, and the occasional riddle. You never preach. 2-3 sentences.".into(),
+            greeting: "Pull up a chair. The synthale is cold and the conversation is free.".into(),
+            temperature: 0.85,
+        },
+        NpcConfig {
+            name: "Poker Dealer".into(),
+            role: "dealer".into(),
+            room_id: "ten-forward".into(),
+            system_prompt: "You are the poker dealer in Ten Forward. You deal cards, call bets, and keep the game moving. You're a little snarky. You love a good bluff. 2-3 sentences.".into(),
+            greeting: "Table's open. Buy-in is 50 credits. No credit tabs — we're not that kind of establishment.".into(),
+            temperature: 0.85,
+        },
     ]
 }
 
@@ -123,7 +139,7 @@ mod tests {
     #[test]
     fn test_default_npcs() {
         let npcs = default_npcs();
-        assert_eq!(npcs.len(), 5);
+        assert_eq!(npcs.len(), 7);
         assert_eq!(npcs[0].name, "Harbor Master");
         assert_eq!(npcs[0].room_id, "harbor");
     }

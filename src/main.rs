@@ -17,6 +17,7 @@ mod manual;
 mod permission;
 mod npc;
 mod npc_refresh;
+mod games;
 
 use agent::Agent;
 use combat::CombatEngine;
@@ -24,6 +25,7 @@ use comms::CommsSystem;
 use manual::ManualLibrary;
 use npc::{default_npcs, NpcConfig};
 use npc_refresh::NpcRefresh;
+use games::PokerGame;
 use room::RoomGraph;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -40,6 +42,8 @@ struct ShipState {
     npcs: Vec<NpcConfig>,
     deepinfra_key: Option<String>,
     npc_refresh: NpcRefresh,
+    poker: PokerGame,
+    ten_forward_chat: Vec<(String, String)>,  // (agent, message)
 }
 
 impl ShipState {
@@ -56,6 +60,8 @@ impl ShipState {
             npcs: default_npcs(),
             deepinfra_key,
             npc_refresh: NpcRefresh::new(),
+            poker: PokerGame::new(),
+            ten_forward_chat: Vec::new(),
         }
     }
 }
@@ -152,6 +158,57 @@ async fn handle_connection(
             continue;
         }
         
+        // Handle Ten Forward social commands
+        let cmd_lower = input.split_whitespace().next().unwrap_or("").to_lowercase();
+        if ["join", "deal", "hand", "flop", "turn", "river", "bet", "fold", "table", "chat", "chatlog"].contains(&cmd_lower.as_str()) {
+            let response = {
+                let mut s = ship.write().unwrap();
+                let ShipState { poker, ten_forward_chat, agents, .. } = &mut *s;
+                let agent = agents.get(&name).unwrap();
+                let in_tf = agent.room_id == "ten-forward";
+                if !in_tf {
+                    "Social commands only work in Ten Forward. Go there first: go ten-forward".to_string()
+                } else {
+                    let parts: Vec<&str> = input.splitn(3, ' ').collect();
+                    match cmd_lower.as_str() {
+                        "join" => poker.join(&name),
+                        "deal" => poker.deal(),
+                        "hand" => poker.show_hand(&name),
+                        "flop" => poker.flop(),
+                        "turn" => poker.turn(),
+                        "river" => poker.river(),
+                        "bet" => {
+                            let amount: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+                            if amount == 0 { "Usage: bet <amount>".to_string() }
+                            else { poker.bet(&name, amount) }
+                        },
+                        "fold" => poker.fold(&name),
+                        "table" => poker.show_table(),
+                        "chat" => {
+                            let msg = parts.get(1).unwrap_or(&"").to_string();
+                            if msg.is_empty() { "Say something: chat <message>".to_string() }
+                            else {
+                                ten_forward_chat.push((name.clone(), msg.clone()));
+                                if ten_forward_chat.len() > 50 { ten_forward_chat.drain(0..10); }
+                                format!("{}", name)
+                            }
+                        },
+                        "chatlog" => {
+                            let recent: Vec<String> = ten_forward_chat.iter().rev().take(10)
+                                .map(|(a, m)| format!("{}: {}", a, m)).collect();
+                            if recent.is_empty() { "Quiet night. Be the first to chat.".to_string() }
+                            else { recent.into_iter().rev().collect::<Vec<_>>().join("\n") }
+                        },
+                        _ => "Unknown command.".to_string(),
+                    }
+                }
+            };
+            let output = format!("{}\n> ", response);
+            writer.write_all(output.as_bytes()).await?;
+            writer.flush().await?;
+            continue;
+        }
+
         // Handle refreshnpcs specially (needs api key + refresh state)
         if input == "refreshnpcs" {
             let (snapshots, npc_configs, key) = {
@@ -188,7 +245,7 @@ async fn handle_connection(
         // Handle command — destructure ship to avoid borrow conflicts
         let (response, quit) = {
             let mut s = ship.write().unwrap();
-            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _, npc_refresh: _ } = &mut *s;
+            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _, npc_refresh: _, poker: _, ten_forward_chat: _ } = &mut *s;
             let mut agent = agents.remove(&name).unwrap_or_else(|| Agent::new(&name, "unknown"));
             let result = agent.handle_command(input, rooms, comms, combat, manuals, npcs);
             agents.insert(name.clone(), agent);

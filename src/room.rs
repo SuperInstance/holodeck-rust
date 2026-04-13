@@ -148,6 +148,8 @@ impl RoomGraph {
         self.create_room("ready-room", "Ready Room", "Deep thinking and strategy. Model hot-swap station.");
         self.create_room("sensors", "Sensor Bay", "Serial bridge to ESP32 hardware. Raw data flows here.");
         self.create_room("guardian", "Guardian Station", "Fleet health monitoring. The watchdog never sleeps.");
+        self.create_room("ten-forward", "Ten Forward", "The social hub. Off-duty agents gather here — poker games, roundtable debates, war stories. No rank, no alerts, just good conversation and cheap synthetics.");
+        self.create_room("holodeck", "Holodeck", "Program running. The room is whatever you need it to be. Training simulations, stress tests, or a quiet beach.");
 
         self.connect("harbor", "bridge", "bridge");
         self.connect("bridge", "harbor", "harbor");
@@ -163,6 +165,10 @@ impl RoomGraph {
         self.connect("sensors", "navigation", "navigation");
         self.connect("bridge", "guardian", "guardian");
         self.connect("guardian", "bridge", "bridge");
+        self.connect("bridge", "ten-forward", "ten-forward");
+        self.connect("ten-forward", "bridge", "bridge");
+        self.connect("bridge", "holodeck", "holodeck");
+        self.connect("holodeck", "bridge", "bridge");
 
         // Wire gauges
         if let Some(nav) = self.rooms.get_mut("navigation") {
