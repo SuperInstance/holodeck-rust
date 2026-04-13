@@ -63,6 +63,7 @@ impl Agent {
             "feedback" => (self.cmd_feedback(args, manuals), false),
             "script" => (self.cmd_add_script(args, combat), false),
             "permission" | "perms" => (format!("Your permission level: {}", self.permission.name()), false),
+            "map" => (self.cmd_map(rooms), false),
             "help" | "?" => (self.cmd_help(), false),
             "quit" | "exit" | "q" => (self.cmd_quit(rooms), true),
             "" => ("> ".to_string(), false),
@@ -314,6 +315,35 @@ impl Agent {
         lines.join("\n")
     }
 
+    fn cmd_map(&self, rooms: &RoomGraph) -> String {
+        let mut lines = vec!["\x1b[1mShip Map\x1b[0m".to_string()];
+        lines.push("".to_string());
+        
+        // Simple room graph from current room
+        let current = &self.room_id;
+        let names = [
+            ("bridge", "Bridge", vec!["harbor", "holodeck", "ready-room", "navigation", "guardian", "ten-forward", "workshop"]),
+            ("harbor", "Harbor", vec!["bridge"]),
+            ("holodeck", "Holodeck", vec!["bridge"]),
+            ("ready-room", "Ready Room", vec!["bridge"]),
+            ("navigation", "Navigation", vec!["bridge"]),
+            ("guardian", "Guardian", vec!["bridge"]),
+            ("ten-forward", "Ten Forward", vec!["bridge"]),
+            ("workshop", "Workshop", vec!["bridge"]),
+        ];
+        
+        for (id, name, exits) in &names {
+            let marker = if *id == current { "\x1b[32m●\x1b[0m" } else { "○" };
+            let exit_str = exits.iter().map(|e| {
+                let exit_name = names.iter().find(|(eid, _, _)| eid == e).map(|(_, n, _)| *n).unwrap_or(e);
+                if e == current { format!("\x1b[33m{}\x1b[0m", exit_name) } else { exit_name.to_string() }
+            }).collect::<Vec<_>>().join(" → ");
+            lines.push(format!("  {} {} [{}]", marker, name, exit_str));
+        }
+        
+        lines.join("\n")
+    }
+
     fn cmd_help(&self) -> String {
         vec![
             "look (l)         — See current room",
@@ -336,7 +366,8 @@ impl Agent {
             "script <desc>    — Add combat script",
             "npc (talk)       — Talk to NPCs in room",
             "help (?)         — This help",
-            "quit (q)         — Disconnect",
+            "quit (q)         — Disconnect
+map              — Show ship map",
         ].join("\n")
     }
 }
