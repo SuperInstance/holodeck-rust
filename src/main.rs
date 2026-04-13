@@ -154,40 +154,27 @@ async fn handle_connection(
         
         // Handle refreshnpcs specially (needs api key + refresh state)
         if input == "refreshnpcs" {
-            let response = {
-                let s = ship.write().unwrap();
-                let ShipState { rooms, deepinfra_key, .. } = &*s;
-                // Snapshot gauge readings and NPC configs (release borrow before async)
-                let snapshots: Vec<(String, Vec<String>)> = rooms.rooms.iter().map(|(id, room)| {
+            let (snapshots, npc_configs, key) = {
+                let s = ship.read().unwrap();
+                let snapshots: Vec<(String, Vec<String>)> = s.rooms.rooms.iter().map(|(id, room)| {
                     let readings: Vec<String> = room.gauges.values().map(|g| {
                         format!("{}: {:.1}{}", g.name, g.value, g.unit)
                     }).collect();
                     (id.clone(), readings)
                 }).collect();
-                let npc_configs: Vec<NpcConfig> = s.npcs.clone();
-                let key = deepinfra_key.clone();
-                (snapshots, npc_configs, key)
-            }; // write lock released
+                (snapshots, s.npcs.clone(), s.deepinfra_key.clone())
+            }; // read lock released
 
-            let (snapshots, npc_configs, key) = response;
             let response = if let Some(api_key) = key {
-                // Run blocking curl calls in background
-                let refreshed = tokio::task::spawn_blocking(move || {
-                    let mut refresh = NpcRefresh::new();
-                    let mut npcs = npc_configs;
-                    match refresh.refresh_all(&mut npcs, &snapshots, &api_key) {
-                        Ok(cost) => (npcs, format!("Refreshed ${:.4}, {} failures.", cost, refresh.failures)),
-                        Err(e) => (npcs, format!("Refresh failed: {}", e))
-                    }
-                }).await;
-                match refreshed {
-                    Ok((new_npcs, msg)) => {
+                match npc_refresh::refresh_npcs_async(npc_configs, &snapshots, &api_key).await {
+                    (new_npcs, cost, failures) => {
                         let mut s = ship.write().unwrap();
                         s.npcs = new_npcs;
                         s.npc_refresh.refresh_count += 1;
-                        msg
+                        s.npc_refresh.total_cost += cost;
+                        s.npc_refresh.failures += failures;
+                        format!("Refreshed ${:.4} ({} failures). Talk with 'npc'.", cost, failures)
                     }
-                    Err(e) => format!("Task error: {}", e)
                 }
             } else {
                 "No DEEPINFRA_API_KEY set.".to_string()
