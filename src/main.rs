@@ -20,6 +20,7 @@ mod npc_refresh;
 mod games;
 mod holodeck;
 mod evolution;
+mod director;
 
 use agent::Agent;
 use combat::CombatEngine;
@@ -48,6 +49,8 @@ struct ShipState {
     ten_forward_chat: Vec<(String, String)>,  // (agent, message)
     active_program: Option<holodeck::ActiveProgram>,
     evolver: evolution::ScriptEvolver,
+    ai_director: Option<director::DirectorState>,
+    agent_actions: Vec<String>,  // track what the agent did for director context
 }
 
 impl ShipState {
@@ -71,6 +74,8 @@ impl ShipState {
             ten_forward_chat: Vec::new(),
             active_program: None,
             evolver,
+            ai_director: None,
+            agent_actions: Vec::new(),
         }
     }
 }
@@ -203,10 +208,10 @@ async fn handle_connection(
         let cmd_lower = input.split_whitespace().next().unwrap_or("").to_lowercase();
 
         // Handle holodeck program commands (only in holodeck room)
-        if ["programs", "run", "tickprog", "adjust", "progstatus", "endprog"].contains(&cmd_lower.as_str()) {
+        if ["programs", "run", "tickprog", "adjust", "progstatus", "endprog", "director"].contains(&cmd_lower.as_str()) {
             let response = {
                 let mut s = ship.write().unwrap();
-                let ShipState { agents, active_program, .. } = &mut *s;
+                let ShipState { agents, active_program, ai_director, agent_actions, .. } = &mut *s;
                 let agent = agents.get(&name).unwrap();
                 let in_holodeck = agent.room_id == "holodeck";
                 if !in_holodeck && cmd_lower != "programs" {
@@ -236,6 +241,13 @@ async fn handle_connection(
                         "tickprog" => {
                             match active_program {
                                 Some(ref mut prog) => {
+                                    // If director is active, inject its event
+                                    if let Some(ref dir) = ai_director {
+                                        let system_prompt = dir.system_prompt();
+                                        let state_prompt = dir.state_prompt(prog, agent_actions);
+                                        // We'll call the API async below
+                                        // For now, just tick normally (director events added via 'directorevent' command)
+                                    }
                                     let msgs = prog.tick();
                                     msgs.join("\n")
                                 },
@@ -249,7 +261,12 @@ async fn handle_connection(
                                 "Usage: adjust <gauge> <delta>  (e.g., adjust reactor_temp -10)".to_string()
                             } else {
                                 match active_program {
-                                    Some(ref mut prog) => prog.adjust(&gauge, delta),
+                                    Some(ref mut prog) => {
+                                        let result = prog.adjust(&gauge, delta);
+                                        agent_actions.push(format!("adjust {} {:+.1}", gauge, delta));
+                                        if agent_actions.len() > 20 { agent_actions.drain(0..5); }
+                                        result
+                                    },
                                     None => "No program running.".to_string()
                                 }
                             }
@@ -262,7 +279,33 @@ async fn handle_connection(
                         },
                         "endprog" => {
                             *active_program = None;
-                            "Holodeck program ended.".to_string()
+                            *ai_director = None;
+                            "Holodeck program ended. Director dismissed.".to_string()
+                        },
+                        "director" => {
+                            let style_name = parts.get(1).unwrap_or(&"").to_string();
+                            if style_name.is_empty() {
+                                match ai_director {
+                                    Some(d) => format!("Director: {:?} (brutality={:.1}, creativity={:.1}, empathy={:.1})",
+                                        d.style, d.brutality, d.creativity, d.empathy),
+                                    None => "No director active. Usage: director <adversary|teacher|storyteller|trickster>".to_string(),
+                                }
+                            } else {
+                                let style = match style_name.as_str() {
+                                    "adversary" => Some(director::DirectorStyle::Adversary),
+                                    "teacher" => Some(director::DirectorStyle::Teacher),
+                                    "storyteller" => Some(director::DirectorStyle::Storyteller),
+                                    "trickster" => Some(director::DirectorStyle::Trickster),
+                                    _ => None,
+                                };
+                                match style {
+                                    Some(s) => {
+                                        *ai_director = Some(director::DirectorState::new(s));
+                                        format!("Director activated: {:?}. The simulation now has a mind of its own.", s)
+                                    },
+                                    None => "Unknown style. Options: adversary, teacher, storyteller, trickster".to_string()
+                                }
+                            }
                         },
                         _ => "Unknown.".to_string()
                     }
@@ -278,7 +321,7 @@ async fn handle_connection(
         if ["join", "deal", "hand", "flop", "turn", "river", "bet", "fold", "table", "chat", "chatlog"].contains(&cmd_lower.as_str()) {
             let response = {
                 let mut s = ship.write().unwrap();
-                let ShipState { poker, ten_forward_chat, agents, .. } = &mut *s;
+                let ShipState { poker, ten_forward_chat, agents, active_program, ai_director, agent_actions, .. } = &mut *s;
                 let agent = agents.get(&name).unwrap();
                 let in_tf = agent.room_id == "ten-forward";
                 if !in_tf {
@@ -415,7 +458,7 @@ async fn handle_connection(
         // Handle command — destructure ship to avoid borrow conflicts
         let (response, quit) = {
             let mut s = ship.write().unwrap();
-            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _, npc_refresh: _, poker: _, ten_forward_chat: _, active_program: _, evolver: _ } = &mut *s;
+            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _, npc_refresh: _, poker: _, ten_forward_chat: _, active_program: _, evolver: _, ai_director: _, agent_actions: _ } = &mut *s;
             let mut agent = agents.remove(&name).unwrap_or_else(|| Agent::new(&name, "unknown"));
             let result = agent.handle_command(input, rooms, comms, combat, manuals, npcs);
             agents.insert(name.clone(), agent);
