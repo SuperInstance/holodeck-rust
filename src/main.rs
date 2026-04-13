@@ -18,6 +18,7 @@ mod permission;
 mod npc;
 mod npc_refresh;
 mod games;
+mod holodeck;
 
 use agent::Agent;
 use combat::CombatEngine;
@@ -44,6 +45,7 @@ struct ShipState {
     npc_refresh: NpcRefresh,
     poker: PokerGame,
     ten_forward_chat: Vec<(String, String)>,  // (agent, message)
+    active_program: Option<holodeck::ActiveProgram>,
 }
 
 impl ShipState {
@@ -62,6 +64,7 @@ impl ShipState {
             npc_refresh: NpcRefresh::new(),
             poker: PokerGame::new(),
             ten_forward_chat: Vec::new(),
+            active_program: None,
         }
     }
 }
@@ -158,8 +161,81 @@ async fn handle_connection(
             continue;
         }
         
-        // Handle Ten Forward social commands
         let cmd_lower = input.split_whitespace().next().unwrap_or("").to_lowercase();
+
+        // Handle holodeck program commands (only in holodeck room)
+        if ["programs", "run", "tickprog", "adjust", "progstatus", "endprog"].contains(&cmd_lower.as_str()) {
+            let response = {
+                let mut s = ship.write().unwrap();
+                let ShipState { agents, active_program, .. } = &mut *s;
+                let agent = agents.get(&name).unwrap();
+                let in_holodeck = agent.room_id == "holodeck";
+                if !in_holodeck && cmd_lower != "programs" {
+                    "Program commands only work in the Holodeck. Go there first: go holodeck".to_string()
+                } else {
+                    let parts: Vec<&str> = input.splitn(3, ' ').collect();
+                    match cmd_lower.as_str() {
+                        "programs" => {
+                            let list = holodeck::HolodeckProgram::list_programs();
+                            format!("Available programs:\n{}", list.join("\n"))
+                        },
+                        "run" => {
+                            let prog_name = parts.get(1).unwrap_or(&"").to_string();
+                            if prog_name.is_empty() {
+                                "Usage: run <program-name>".to_string()
+                            } else {
+                                match holodeck::HolodeckProgram::catalog().into_iter().find(|p| p.name == prog_name) {
+                                    Some(prog) => {
+                                        let status = prog.objective.clone();
+                                        *active_program = Some(holodeck::ActiveProgram::new(prog));
+                                        format!("Holodeck program loaded: {}\nObjective: {}\nType 'tickprog' to advance, 'adjust <gauge> <delta>' to intervene, 'progstatus' to check.", prog_name, status)
+                                    },
+                                    None => format!("Unknown program '{}'. Type 'programs' to see available.", prog_name)
+                                }
+                            }
+                        },
+                        "tickprog" => {
+                            match active_program {
+                                Some(ref mut prog) => {
+                                    let msgs = prog.tick();
+                                    msgs.join("\n")
+                                },
+                                None => "No program running. Type 'run <name>' to start one.".to_string()
+                            }
+                        },
+                        "adjust" => {
+                            let gauge = parts.get(1).unwrap_or(&"").to_string();
+                            let delta: f64 = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                            if gauge.is_empty() || delta == 0.0 {
+                                "Usage: adjust <gauge> <delta>  (e.g., adjust reactor_temp -10)".to_string()
+                            } else {
+                                match active_program {
+                                    Some(ref mut prog) => prog.adjust(&gauge, delta),
+                                    None => "No program running.".to_string()
+                                }
+                            }
+                        },
+                        "progstatus" => {
+                            match active_program {
+                                Some(ref prog) => prog.status(),
+                                None => "No program running.".to_string()
+                            }
+                        },
+                        "endprog" => {
+                            *active_program = None;
+                            "Holodeck program ended.".to_string()
+                        },
+                        _ => "Unknown.".to_string()
+                    }
+                }
+            };
+            let output = format!("{}\n> ", response);
+            writer.write_all(output.as_bytes()).await?;
+            writer.flush().await?;
+            continue;
+        }
+
+        // Handle Ten Forward social commands
         if ["join", "deal", "hand", "flop", "turn", "river", "bet", "fold", "table", "chat", "chatlog"].contains(&cmd_lower.as_str()) {
             let response = {
                 let mut s = ship.write().unwrap();
@@ -245,7 +321,7 @@ async fn handle_connection(
         // Handle command — destructure ship to avoid borrow conflicts
         let (response, quit) = {
             let mut s = ship.write().unwrap();
-            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _, npc_refresh: _, poker: _, ten_forward_chat: _ } = &mut *s;
+            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _, npc_refresh: _, poker: _, ten_forward_chat: _, active_program: _ } = &mut *s;
             let mut agent = agents.remove(&name).unwrap_or_else(|| Agent::new(&name, "unknown"));
             let result = agent.handle_command(input, rooms, comms, combat, manuals, npcs);
             agents.insert(name.clone(), agent);
