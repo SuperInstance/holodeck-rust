@@ -19,6 +19,7 @@ mod npc;
 mod npc_refresh;
 mod games;
 mod holodeck;
+mod evolution;
 
 use agent::Agent;
 use combat::CombatEngine;
@@ -46,6 +47,7 @@ struct ShipState {
     poker: PokerGame,
     ten_forward_chat: Vec<(String, String)>,  // (agent, message)
     active_program: Option<holodeck::ActiveProgram>,
+    evolver: evolution::ScriptEvolver,
 }
 
 impl ShipState {
@@ -53,10 +55,13 @@ impl ShipState {
         let mut rooms = RoomGraph::new();
         rooms.build_default_ship();
         let deepinfra_key = std::env::var("DEEPINFRA_API_KEY").ok();
+        let mut combat = CombatEngine::new();
+        let mut evolver = evolution::ScriptEvolver::new();
+        evolution::ScriptEvolver::seed_defaults(&mut combat);
         Self {
             rooms,
             comms: CommsSystem::new(),
-            combat: CombatEngine::new(),
+            combat,
             manuals: ManualLibrary::new(),
             agents: HashMap::new(),
             npcs: default_npcs(),
@@ -65,6 +70,7 @@ impl ShipState {
             poker: PokerGame::new(),
             ten_forward_chat: Vec::new(),
             active_program: None,
+            evolver,
         }
     }
 }
@@ -285,6 +291,39 @@ async fn handle_connection(
             continue;
         }
 
+        // Handle evolve and scripts globally
+        if cmd_lower == "evolve" || cmd_lower == "scripts" {
+            let response = if cmd_lower == "evolve" {
+                let room_gauges: HashMap<String, HashMap<String, crate::gauge::Gauge>> = {
+                    let s = ship.read().unwrap();
+                    s.rooms.rooms.iter().map(|(id, room)| {
+                        (id.clone(), room.gauges.clone())
+                    }).collect()
+                };
+                let (mutations, gen) = {
+                    let mut s = ship.write().unwrap();
+                    let ShipState { evolver, combat, .. } = &mut *s;
+                    let gen = evolver.generation;
+                    let m = evolver.evolve(combat, &room_gauges);
+                    (m, gen)
+                };
+                if mutations.is_empty() { "No mutations this cycle.".to_string() }
+                else { format!("Evolution gen {}:\n{}", gen, mutations.join("\n")) }
+            } else {
+                let s = ship.read().unwrap();
+                let script_list: Vec<String> = s.combat.scripts.iter()
+                    .map(|sc| format!("  {} (gen {}, pri {}) — {} conditions",
+                        sc.name, sc.generation, sc.priority, sc.conditions.len()))
+                    .collect();
+                let stats = s.evolver.stats(&s.combat);
+                format!("{}\n{}", stats, script_list.join("\n"))
+            };
+            let output = format!("{}\n> ", response);
+            writer.write_all(output.as_bytes()).await?;
+            writer.flush().await?;
+            continue;
+        }
+
         // Handle refreshnpcs specially (needs api key + refresh state)
         if input == "refreshnpcs" {
             let (snapshots, npc_configs, key) = {
@@ -321,7 +360,7 @@ async fn handle_connection(
         // Handle command — destructure ship to avoid borrow conflicts
         let (response, quit) = {
             let mut s = ship.write().unwrap();
-            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _, npc_refresh: _, poker: _, ten_forward_chat: _, active_program: _ } = &mut *s;
+            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _, npc_refresh: _, poker: _, ten_forward_chat: _, active_program: _, evolver: _ } = &mut *s;
             let mut agent = agents.remove(&name).unwrap_or_else(|| Agent::new(&name, "unknown"));
             let result = agent.handle_command(input, rooms, comms, combat, manuals, npcs);
             agents.insert(name.clone(), agent);
