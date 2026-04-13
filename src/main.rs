@@ -90,6 +90,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let ship = Arc::new(RwLock::new(ShipState::new()));
     
+    // Background combat ticker — ticks every 30 seconds
+    {
+        let ship = ship.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                let mut s = ship.write().unwrap();
+                // Tick combat for each room with gauges
+                let room_ids: Vec<String> = s.rooms.rooms.keys().cloned().collect();
+                for room_id in &room_ids {
+                    if let Some(room) = s.rooms.get_room(&room_id) {
+                        if !room.gauges.is_empty() {
+                            let gauges = room.gauges.clone();
+                            s.combat.tick(room_id, &gauges);
+                        }
+                    }
+                }
+                // Auto-evolve every 10 ticks
+                if s.combat.tick_count % 10 == 0 && s.combat.tick_count > 0 {
+                    let room_gauges: HashMap<String, HashMap<String, _>> = s.rooms.rooms.iter()
+                        .map(|(id, room)| (id.clone(), room.gauges.clone()))
+                        .collect();
+                    let ShipState { evolver, combat, .. } = &mut *s;
+                    let mutations = evolver.evolve(combat, &room_gauges);
+                    if !mutations.is_empty() {
+                        println!("🧬 Evolution: {}", mutations.join(", "));
+                    }
+                }
+            }
+        });
+    }
+    
     {
         let s = ship.read().unwrap();
         println!("  Rooms: {}", s.rooms.list_rooms().join(", "));
