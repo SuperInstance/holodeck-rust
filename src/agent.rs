@@ -27,6 +27,79 @@ impl Agent {
         }
     }
 
+    /// Process and execute a user command, updating agent state as needed.
+    ///
+    /// # Purpose
+    /// This is the central command dispatcher for agent interactions. It parses
+    /// the input string, identifies the command and arguments, and delegates to
+    /// the appropriate command handler method. Commands can affect agent state,
+    /// room state, communication systems, combat engine, manuals, and NPCs.
+    ///
+    /// # Arguments
+    /// * `input` - The raw command string from the user (e.g., "go north", "say hello", "look")
+    /// * `rooms` - Mutable reference to the room graph, which may be modified by movement commands
+    /// * `comms` - Mutable reference to the communications system, used by say/tell/yell/gossip/note/mail
+    /// * `combat` - Mutable reference to the combat engine, used by tick/alert/script commands
+    /// * `manuals` - Mutable reference to the manual library, used by manual/feedback commands
+    /// * `npcs` - Slice of NPC configurations, used to list NPCs in the current room
+    ///
+    /// # Returns
+    /// A tuple of `(String, bool)` where:
+    /// - The first element is the response message to display to the user
+    /// - The second element is a quit flag: `true` if the agent should disconnect, `false` otherwise
+    ///
+    /// # Errors
+    /// This function does not return errors directly. Unknown commands return an error message
+    /// in the response tuple. Commands with insufficient permissions return an appropriate message.
+    ///
+    /// # Supported Commands
+    /// - `look` or `l`: Look around the current room
+    /// - `go <direction>`: Move to an adjacent room (also accepts `move`, `walk`)
+    /// - `say <message>`: Speak to everyone in the current room (also accepts `"`)
+    /// - `tell <agent> <message>`: Send a private message to another agent
+    /// - `yell <message>`: Broadcast to all agents on the ship
+    /// - `gossip <message>`: Broadcast to all agents in the fleet
+    /// - `who`: List agents in the current room
+    /// - `status`: Show ship status, alerts, and agent info
+    /// - `tick`: Run combat tick (requires appropriate permissions)
+    /// - `alert [level]`: Set or view alert level (green/yellow/red)
+    /// - `note <content>`: Write a note on the current room's wall
+    /// - `notes`: Read notes on the current room's wall
+    /// - `mail`: Check mailbox for messages
+    /// - `gauge <name> <value>`: Update a gauge in the current room
+    /// - `sim`/`real`: Switch between simulation and real sensor data modes
+    /// - `manual`: Read the living manual for this room
+    /// - `feedback <1-5> <comment>`: Rate the manual and provide feedback
+    /// - `script <description>`: Add a combat script
+    /// - `npc` or `talk`: List NPCs in the current room
+    /// - `permission` or `perms`: Show your permission level
+    /// - `map`: Display ship map with current location highlighted
+    /// - `help` or `?`: Show help with all available commands
+    /// - `quit` or `exit` or `q`: Disconnect from the holodeck
+    ///
+    /// # Usage Example
+    /// ```no_run
+    /// # use holodeck_rust::agent::Agent;
+    /// # use holodeck_rust::room::RoomGraph;
+    /// # use holodeck_rust::comms::CommsSystem;
+    /// # use holodeck_rust::combat::CombatEngine;
+    /// # use holodeck_rust::manual::ManualLibrary;
+    /// # use holodeck_rust::npc::NpcConfig;
+    /// let mut agent = Agent::new("TestAgent", "harbor");
+    /// let mut rooms = RoomGraph::new();
+    /// let mut comms = CommsSystem::new();
+    /// let mut combat = CombatEngine::new();
+    /// let mut manuals = ManualLibrary::new();
+    /// let npcs: Vec<NpcConfig> = vec![];
+    ///
+    /// // Execute a look command
+    /// let (response, quit) = agent.handle_command("look", &mut rooms, &mut comms, &mut combat, &mut manuals, &npcs);
+    /// assert_eq!(quit, false);
+    ///
+    /// // Execute a movement command
+    /// let (response, quit) = agent.handle_command("go bridge", &mut rooms, &mut comms, &mut combat, &mut manuals, &npcs);
+    /// assert_eq!(agent.room_id, "bridge");
+    /// ```
     pub fn handle_command(
         &mut self,
         input: &str,
@@ -72,10 +145,17 @@ impl Agent {
     }
 
     fn cmd_look(&self, rooms: &RoomGraph) -> String {
-        match rooms.get_room(&self.room_id) {
-            Some(room) => room.look(),
-            None => "You are nowhere.".to_string(),
-        }
+        self.get_current_room(rooms)
+            .map(|room| room.look())
+            .unwrap_or_else(|| self.format_nowhere_message())
+    }
+
+    fn get_current_room<'a>(&'a self, rooms: &'a RoomGraph) -> Option<&'a crate::room::Room> {
+        rooms.get_room(&self.room_id)
+    }
+
+    fn format_nowhere_message(&self) -> String {
+        "You are nowhere.".to_string()
     }
 
     fn cmd_go(&mut self, args: &str, rooms: &mut RoomGraph) -> (String, bool) {

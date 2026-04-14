@@ -4,6 +4,14 @@ version = "0.3.0"
 edition = "2021"
 description = "Advanced FLUX-LCAR Holodeck — pure Rust implementation"
 
+[lib]
+name = "holodeck_rust"
+path = "src/lib.rs"
+
+[[bin]]
+name = "holodeck-rust"
+path = "src/main.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
