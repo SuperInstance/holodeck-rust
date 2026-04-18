@@ -21,6 +21,7 @@ mod games;
 mod holodeck;
 mod evolution;
 mod director;
+mod plato_bridge;
 
 use agent::Agent;
 use combat::CombatEngine;
@@ -30,6 +31,7 @@ use npc::{default_npcs, NpcConfig};
 use npc_refresh::NpcRefresh;
 use games::PokerGame;
 use room::RoomGraph;
+use plato_bridge::PlatoBridge;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -51,6 +53,7 @@ struct ShipState {
     evolver: evolution::ScriptEvolver,
     ai_director: Option<director::DirectorState>,
     agent_actions: Vec<String>,  // track what the agent did for director context
+    plato: PlatoBridge,          // tile + sentiment bridge to plato-torch
 }
 
 impl ShipState {
@@ -76,6 +79,7 @@ impl ShipState {
             evolver,
             ai_director: None,
             agent_actions: Vec::new(),
+            plato: PlatoBridge::new("/tmp/plato-tiles"),
         }
     }
 }
@@ -214,13 +218,13 @@ async fn handle_connection(
         let cmd_lower = input.split_whitespace().next().unwrap_or("").to_lowercase();
 
         // Handle holodeck program commands (only in holodeck room)
-        if ["programs", "run", "tickprog", "adjust", "progstatus", "endprog", "director"].contains(&cmd_lower.as_str()) {
+        if ["programs", "run", "tickprog", "adjust", "progstatus", "endprog", "director", "sentiment", "tiles", "flushtiles"].contains(&cmd_lower.as_str()) {
             let response = {
                 let mut s = ship.write().unwrap();
-                let ShipState { agents, active_program, ai_director, agent_actions, .. } = &mut *s;
+                let ShipState { agents, active_program, ai_director, agent_actions, plato, .. } = &mut *s;
                 let agent = agents.get(&name).unwrap();
                 let in_holodeck = agent.room_id == "holodeck";
-                if !in_holodeck && cmd_lower != "programs" {
+                if !in_holodeck && cmd_lower != "programs" && cmd_lower != "sentiment" && cmd_lower != "tiles" && cmd_lower != "flushtiles" {
                     "Program commands only work in the Holodeck. Go there first: go holodeck".to_string()
                 } else {
                     let parts: Vec<&str> = input.splitn(3, ' ').collect();
@@ -311,6 +315,41 @@ async fn handle_connection(
                                     },
                                     None => "Unknown style. Options: adversary, teacher, storyteller, trickster".to_string()
                                 }
+                            }
+                        },
+                        "flushtiles" => {
+                            let count = plato.stats().1;
+                            plato.flush();
+                            format!("Flushed {} tiles to disk.", count)
+                        },
+                        "sentiment" => {
+                            let room = agent.room_id.clone();
+                            match plato.get_sentiment(&room) {
+                                Some(sent) => {
+                                    let bias = sent.bias();
+                                    format!(
+                                        "Room Sentiment [{}]\n  energy:     {:.2}\n  flow:       {:.2}\n  frustration:{:.2}\n  discovery:  {:.2}\n  tension:    {:.2}\n  confidence: {:.2}\n\nBias: explore={:.2} safe={:.2} novel={:.2}\nJEPA: {:?}",
+                                        room, sent.energy, sent.flow, sent.frustration,
+                                        sent.discovery, sent.tension, sent.confidence,
+                                        bias.explore_bias, bias.safe_bias, bias.novel_bias,
+                                        sent.to_jepa_vector()
+                                    )
+                                },
+                                None => format!("No sentiment data for room '{}'. Do something first!", room),
+                            }
+                        },
+                        "tiles" => {
+                            let room = agent.room_id.clone();
+                            let tiles = plato.room_tiles(&room, 5);
+                            if tiles.is_empty() {
+                                format!("No tiles recorded for room '{}'.", room)
+                            } else {
+                                let header = format!("Recent tiles in {} ({} shown):", room, tiles.len());
+                                let body: Vec<String> = tiles.iter().map(|t| {
+                                    format!("  {} → {} ({:.1}) [{}]", t.agent, t.action, t.reward, t.outcome)
+                                }).collect();
+                                format!("{}\n{}\nStats: {} events, {} tiles buffered, {} rooms tracked",
+                                    header, body.join("\n"), plato.stats().0, plato.stats().1, plato.stats().2)
                             }
                         },
                         _ => "Unknown.".to_string()
@@ -461,11 +500,24 @@ async fn handle_connection(
         // Handle command — destructure ship to avoid borrow conflicts
         let (response, quit) = {
             let mut s = ship.write().unwrap();
-            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _, npc_refresh: _, poker: _, ten_forward_chat: _, active_program: _, evolver: _, ai_director: _, agent_actions: _ } = &mut *s;
+            let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _, npc_refresh: _, poker: _, ten_forward_chat: _, active_program: _, evolver: _, ai_director: _, agent_actions: _, plato } = &mut *s;
             let mut agent = agents.remove(&name).unwrap_or_else(|| Agent::new(&name, "unknown"));
-            let result = agent.handle_command(input, rooms, comms, combat, manuals, npcs);
+            let old_room = agent.room_id.clone();
+            let (result, quit) = agent.handle_command(input, rooms, comms, combat, manuals, npcs);
+            let new_room = agent.room_id.clone();
+            
+            // Record tile for this action
+            let reward = if result.contains("success") || result.contains("done") || result.contains("moved") { 1.0 } else { 0.0 };
+            let is_discovery = result.contains("discovered") || result.contains("found") || result.contains("new");
+            plato.record_event(&new_room, &name, &cmd_lower, &result, reward, is_discovery);
+            
+            // If agent moved rooms, record that too
+            if old_room != new_room {
+                plato.record_event(&new_room, &name, "arrive", &format!("from {}", old_room), 0.5, false);
+            }
+            
             agents.insert(name.clone(), agent);
-            result
+            (result, quit)
         };
         
         let output = format!("{}\n> ", response);
