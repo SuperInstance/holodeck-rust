@@ -22,6 +22,7 @@ mod holodeck;
 mod evolution;
 mod director;
 mod plato_bridge;
+mod sentiment_npc;
 
 use agent::Agent;
 use combat::CombatEngine;
