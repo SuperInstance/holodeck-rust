@@ -347,7 +347,7 @@ async fn handle_connection(
                             } else {
                                 let header = format!("Recent tiles in {} ({} shown):", room, tiles.len());
                                 let body: Vec<String> = tiles.iter().map(|t| {
-                                    format!("  {} → {} ({:.1}) [{}]", t.agent, t.action, t.reward, t.outcome)
+                                    format!("  {} → {} ({:.1}) [{}]", t.provenance.source, t.question, t.confidence, t.answer)
                                 }).collect();
                                 format!("{}\n{}\nStats: {} events, {} tiles buffered, {} rooms tracked",
                                     header, body.join("\n"), plato.stats().0, plato.stats().1, plato.stats().2)

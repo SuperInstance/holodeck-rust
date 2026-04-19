@@ -1,6 +1,7 @@
 //! Plato-Torch Bridge — connects holodeck rooms to plato-torch training.
 //!
-//! Room events generate tiles. Room sentiment affects NPC behavior.
+//! S1-3: Refactored to use plato_tile_spec::Tile as canonical type.
+//! Room events generate canonical tiles. Room sentiment affects NPC behavior.
 //! The bridge runs in the background, watching room activity and
 //! feeding it to plato-torch's statistical models.
 
@@ -11,18 +12,119 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-/// A tile — the atomic unit of room experience.
+// ── Canonical Tile (plato-tile-spec compatible) ──────────────
+
+/// Provenance — where a tile came from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Provenance {
+    pub source: String,
+    pub generation: u32,
+}
+
+/// Constraint block from constraint theory engine.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ConstraintBlock {
+    pub tolerance: f64,
+    pub threshold: f64,
+}
+
+impl Default for ConstraintBlock {
+    fn default() -> Self {
+        Self { tolerance: 0.05, threshold: 0.5 }
+    }
+}
+
+/// Tile domain — what kind of knowledge this tile represents.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum TileDomain {
+    Knowledge,
+    Procedural,
+    Experience,
+    Constraint,
+    NegativeSpace,
+    Belief,
+    Lock,
+    Sentiment,
+    Diagnostic,
+    Semantic,
+    Ghost,
+    Simulation,
+    Anchor,
+    Meta,
+}
+
+/// Canonical Tile — compatible with plato-tile-spec::Tile.
+///
+/// Fields map 1:1 to the Rust plato_tile_spec crate.
+/// Holodeck-specific data (room_id, state_hash) lives in the
+/// `context` HashMap alongside the canonical fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tile {
+    // Core
+    pub id: String,
+    pub confidence: f64,
+    pub provenance: Provenance,
+    pub domain: TileDomain,
+
+    // Content
+    pub question: String,
+    pub answer: String,
+    pub tags: Vec<String>,
+    pub anchors: Vec<String>,
+
+    // Attention
+    pub weight: f64,
+    pub use_count: u64,
+    pub active: bool,
+    pub last_used_tick: u64,
+
+    // Constraints
+    pub constraints: ConstraintBlock,
+
+    // Holodeck extension (not in canonical spec, preserved for compatibility)
     pub room_id: String,
-    pub agent: String,
-    pub action: String,
-    pub outcome: String,
-    pub reward: f64,
-    pub timestamp: u64,
     pub state_hash: String,
     pub context: HashMap<String, String>,
 }
+
+impl Tile {
+    /// Create a canonical tile from a holodeck event.
+    pub fn from_event(
+        room_id: &str,
+        agent: &str,
+        action: &str,
+        outcome: &str,
+        reward: f64,
+        timestamp: u64,
+    ) -> Self {
+        let state_str = format!("{}:{}", room_id, agent);
+        let state_hash = simple_hash(&state_str);
+
+        Self {
+            id: format!("holo-{}", timestamp),
+            confidence: reward.clamp(0.0, 1.0),
+            provenance: Provenance {
+                source: agent.to_string(),
+                generation: 0,
+            },
+            domain: TileDomain::Experience,
+            question: action.to_string(),
+            answer: outcome.to_string(),
+            tags: vec!["holodeck".to_string(), room_id.to_string()],
+            anchors: vec![],
+            weight: 1.0,
+            use_count: 0,
+            active: true,
+            last_used_tick: timestamp,
+            constraints: ConstraintBlock::default(),
+            room_id: room_id.to_string(),
+            state_hash,
+            context: HashMap::new(),
+        }
+    }
+}
+
+// ── Room Sentiment ──────────────────────────────────────────
 
 /// Room sentiment — 6 dimensions of room mood.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,9 +157,8 @@ impl RoomSentiment {
         Self { room_id: room_id.to_string(), ..Default::default() }
     }
 
-    /// Update sentiment based on a new event.
     pub fn observe(&mut self, reward: f64, is_new: bool) {
-        let alpha = 0.1; // EMA smoothing
+        let alpha = 0.1;
         self.energy = self.energy * (1.0 - alpha) + 1.0 * alpha;
         
         if reward > 0.0 {
@@ -77,7 +178,6 @@ impl RoomSentiment {
         }
     }
 
-    /// Sentiment affects NPC behavior: biased randomness.
     pub fn bias(&self) -> BiasConfig {
         BiasConfig {
             explore_bias: if self.discovery > 0.6 { 0.3 } else { 0.1 },
@@ -86,7 +186,6 @@ impl RoomSentiment {
         }
     }
 
-    /// Export as JEPA context vector for edge consumption.
     pub fn to_jepa_vector(&self) -> [f64; 6] {
         [self.energy, self.flow, self.frustration,
          self.discovery, self.tension, self.confidence]
@@ -96,12 +195,13 @@ impl RoomSentiment {
 /// NPC behavior bias based on room sentiment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BiasConfig {
-    pub explore_bias: f64,  // How much to explore vs exploit
-    pub safe_bias: f64,     // How much to prefer safe actions
-    pub novel_bias: f64,    // How much to try novel approaches
+    pub explore_bias: f64,
+    pub safe_bias: f64,
+    pub novel_bias: f64,
 }
 
-/// The bridge between holodeck rooms and plato-torch.
+// ── Plato Bridge ─────────────────────────────────────────────
+
 pub struct PlatoBridge {
     tiles: Vec<Tile>,
     sentiments: HashMap<String, RoomSentiment>,
@@ -123,7 +223,6 @@ impl PlatoBridge {
         }
     }
 
-    /// Record a room event as a tile.
     pub fn record_event(
         &mut self,
         room_id: &str,
@@ -138,32 +237,16 @@ impl PlatoBridge {
             .unwrap_or_default()
             .as_secs();
 
-        // State hash from room + agent
-        let state_str = format!("{}:{}", room_id, agent);
-        let state_hash = simple_hash(&state_str);
+        let tile = Tile::from_event(room_id, agent, action, outcome, reward, timestamp);
 
-        let tile = Tile {
-            room_id: room_id.to_string(),
-            agent: agent.to_string(),
-            action: action.to_string(),
-            outcome: outcome.to_string(),
-            reward,
-            timestamp,
-            state_hash,
-            context: HashMap::new(),
-        };
-
-        // Update room sentiment
         let sentiment = self.sentiments
             .entry(room_id.to_string())
             .or_insert_with(|| RoomSentiment::for_room(room_id));
         sentiment.observe(reward, is_discovery);
 
-        // Store tile
         self.tiles.push(tile.clone());
         self.event_count += 1;
 
-        // Flush to disk if buffer is full
         if self.tiles.len() >= self.max_tiles {
             self.flush();
         }
@@ -171,19 +254,16 @@ impl PlatoBridge {
         tile
     }
 
-    /// Get current sentiment for a room.
     pub fn get_sentiment(&self, room_id: &str) -> Option<&RoomSentiment> {
         self.sentiments.get(room_id)
     }
 
-    /// Get bias config for a room (for NPC behavior).
     pub fn get_bias(&self, room_id: &str) -> BiasConfig {
         self.sentiments.get(room_id)
             .map(|s| s.bias())
             .unwrap_or_else(|| BiasConfig { explore_bias: 0.1, safe_bias: 0.1, novel_bias: 0.1 })
     }
 
-    /// Get recent tiles for a room.
     pub fn room_tiles(&self, room_id: &str, limit: usize) -> Vec<&Tile> {
         self.tiles.iter()
             .filter(|t| t.room_id == room_id)
@@ -192,7 +272,6 @@ impl PlatoBridge {
             .collect()
     }
 
-    /// Flush tiles to disk (plato-torch compatible JSON).
     pub fn flush(&mut self) {
         if self.tiles.is_empty() { return; }
         
@@ -209,21 +288,18 @@ impl PlatoBridge {
         self.tiles.clear();
     }
 
-    /// Export all room sentiments as JEPA context vectors.
     pub fn export_jepa_context(&self) -> HashMap<String, [f64; 6]> {
         self.sentiments.iter()
             .map(|(k, v)| (k.clone(), v.to_jepa_vector()))
             .collect()
     }
 
-    /// Get stats.
     pub fn stats(&self) -> (u64, usize, usize) {
         (self.event_count, self.tiles.len(), self.sentiments.len())
     }
 }
 
 fn simple_hash(s: &str) -> String {
-    // FNV-1a inspired simple hash (no external deps)
     let mut hash: u64 = 0x811c9dc5;
     for byte in s.bytes() {
         hash ^= byte as u64;
