@@ -107,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
             loop {
                 interval.tick().await;
-                let mut s = ship.write().unwrap();
+                let mut s = ship.write().unwrap_or_else(|e| e.into_inner());
                 // Tick combat for each room with gauges
                 let room_ids: Vec<String> = s.rooms.rooms.keys().cloned().collect();
                 for room_id in &room_ids {
@@ -134,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     
     {
-        let s = ship.read().unwrap();
+        let s = ship.read().unwrap_or_else(|e| e.into_inner());
         println!("  Rooms: {}", s.rooms.list_rooms().join(", "));
         println!("  Combat scripts: {}", s.combat.scripts.len());
         println!("  Connect: nc localhost {}", port);
@@ -182,7 +182,7 @@ async fn handle_connection(
     
     // Register agent
     {
-        let mut s = ship.write().unwrap();
+        let mut s = ship.write().unwrap_or_else(|e| e.into_inner());
         let agent = Agent::new(&name, "harbor");
         s.agents.insert(name.clone(), agent);
         if let Some(room) = s.rooms.get_room_mut("harbor") {
@@ -192,7 +192,7 @@ async fn handle_connection(
     
     // Send initial look
     let output = {
-        let s = ship.read().unwrap();
+        let s = ship.read().unwrap_or_else(|e| e.into_inner());
         let look = s.rooms.get_room("harbor").map(|r| r.look()).unwrap_or_default();
         format!("\n{}\n> ", look)
         // s is dropped here
@@ -221,9 +221,11 @@ async fn handle_connection(
         // Handle holodeck program commands (only in holodeck room)
         if ["programs", "run", "tickprog", "adjust", "progstatus", "endprog", "director", "sentiment", "tiles", "flushtiles"].contains(&cmd_lower.as_str()) {
             let response = {
-                let mut s = ship.write().unwrap();
+                let mut s = ship.write().unwrap_or_else(|e| e.into_inner());
                 let ShipState { agents, active_program, ai_director, agent_actions, plato, .. } = &mut *s;
-                let agent = agents.get(&name).unwrap();
+                // NOTE: agent MUST exist here — we registered it on connect. Panic is appropriate if it's missing.
+                let agent = agents.get(&name)
+                    .expect("agent missing from ship state — registration bug");
                 let in_holodeck = agent.room_id == "holodeck";
                 if !in_holodeck && cmd_lower != "programs" && cmd_lower != "sentiment" && cmd_lower != "tiles" && cmd_lower != "flushtiles" {
                     "Program commands only work in the Holodeck. Go there first: go holodeck".to_string()
@@ -366,9 +368,10 @@ async fn handle_connection(
         // Handle Ten Forward social commands
         if ["join", "deal", "hand", "flop", "turn", "river", "bet", "fold", "table", "chat", "chatlog"].contains(&cmd_lower.as_str()) {
             let response = {
-                let mut s = ship.write().unwrap();
+                let mut s = ship.write().unwrap_or_else(|e| e.into_inner());
                 let ShipState { poker, ten_forward_chat, agents, active_program: _, ai_director: _, agent_actions: _, .. } = &mut *s;
-                let agent = agents.get(&name).unwrap();
+                let agent = agents.get(&name)
+                    .expect("agent missing from ship state — registration bug");
                 let in_tf = agent.room_id == "ten-forward";
                 if !in_tf {
                     "Social commands only work in Ten Forward. Go there first: go ten-forward".to_string()
@@ -417,13 +420,13 @@ async fn handle_connection(
         if cmd_lower == "evolve" || cmd_lower == "scripts" {
             let response = if cmd_lower == "evolve" {
                 let room_gauges: HashMap<String, HashMap<String, crate::gauge::Gauge>> = {
-                    let s = ship.read().unwrap();
+                    let s = ship.read().unwrap_or_else(|e| e.into_inner());
                     s.rooms.rooms.iter().map(|(id, room)| {
                         (id.clone(), room.gauges.clone())
                     }).collect()
                 };
                 let (mutations, gen) = {
-                    let mut s = ship.write().unwrap();
+                    let mut s = ship.write().unwrap_or_else(|e| e.into_inner());
                     let ShipState { evolver, combat, .. } = &mut *s;
                     let gen = evolver.generation;
                     let m = evolver.evolve(combat, &room_gauges);
@@ -432,7 +435,7 @@ async fn handle_connection(
                 if mutations.is_empty() { "No mutations this cycle.".to_string() }
                 else { format!("Evolution gen {}:\n{}", gen, mutations.join("\n")) }
             } else {
-                let s = ship.read().unwrap();
+                let s = ship.read().unwrap_or_else(|e| e.into_inner());
                 let script_list: Vec<String> = s.combat.scripts.iter()
                     .map(|sc| format!("  {} (gen {}, pri {}) — {} conditions",
                         sc.name, sc.generation, sc.priority, sc.conditions.len()))
@@ -471,7 +474,7 @@ async fn handle_connection(
         // Handle refreshnpcs specially (needs api key + refresh state)
         if input == "refreshnpcs" {
             let (snapshots, npc_configs, key) = {
-                let s = ship.read().unwrap();
+                let s = ship.read().unwrap_or_else(|e| e.into_inner());
                 let snapshots: Vec<(String, Vec<String>)> = s.rooms.rooms.iter().map(|(id, room)| {
                     let readings: Vec<String> = room.gauges.values().map(|g| {
                         format!("{}: {:.1}{}", g.name, g.value, g.unit)
@@ -483,7 +486,7 @@ async fn handle_connection(
 
             let response = if let Some(api_key) = key {
                 let (new_npcs, cost, failures) = npc_refresh::refresh_npcs_async(npc_configs, &snapshots, &api_key).await;
-                let mut s = ship.write().unwrap();
+                let mut s = ship.write().unwrap_or_else(|e| e.into_inner());
                 s.npcs = new_npcs;
                 s.npc_refresh.refresh_count += 1;
                 s.npc_refresh.total_cost += cost;
@@ -500,7 +503,7 @@ async fn handle_connection(
 
         // Handle command — destructure ship to avoid borrow conflicts
         let (response, quit) = {
-            let mut s = ship.write().unwrap();
+            let mut s = ship.write().unwrap_or_else(|e| e.into_inner());
             let ShipState { rooms, comms, combat, manuals, agents, npcs, deepinfra_key: _, npc_refresh: _, poker: _, ten_forward_chat: _, active_program: _, evolver: _, ai_director: _, agent_actions: _, plato } = &mut *s;
             let mut agent = agents.remove(&name).unwrap_or_else(|| Agent::new(&name, "unknown"));
             let old_room = agent.room_id.clone();
@@ -530,7 +533,7 @@ async fn handle_connection(
     
     // Cleanup
     {
-        let mut s = ship.write().unwrap();
+        let mut s = ship.write().unwrap_or_else(|e| e.into_inner());
         if let Some(agent) = s.agents.remove(&name) {
             if let Some(room) = s.rooms.get_room_mut(&agent.room_id) {
                 room.agent_leave(&name);

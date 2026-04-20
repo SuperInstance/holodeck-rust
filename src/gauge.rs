@@ -70,7 +70,7 @@ impl Gauge {
         if recent.len() < 2 {
             return 0.0;
         }
-        (recent.first().unwrap() - recent.last().unwrap()) / recent.len() as f64
+        (recent.first().copied().unwrap_or(0.0) - recent.last().copied().unwrap_or(0.0)) / recent.len() as f64
     }
 
     pub fn display(&self) -> String {

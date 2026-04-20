@@ -152,7 +152,7 @@ impl PokerGame {
         if !self.hands.contains_key(name) {
             return "You're not at the table.".to_string();
         }
-        *self.bets.get_mut(name).unwrap() += amount;
+        *self.bets.get_mut(name).expect("bet: player must exist after contains_key check") += amount;
         self.pot += amount;
         self.current_bet = self.current_bet.max(amount);
         format!("{} bets {}. Pot: {}", name, amount, self.pot)
@@ -162,7 +162,7 @@ impl PokerGame {
         if self.hands.remove(name).is_some() {
             self.bets.remove(name);
             if self.hands.len() == 1 {
-                let winner = self.hands.keys().next().unwrap().clone();
+                let winner = self.hands.keys().next().expect("fold: must have 1 remaining player").clone();
                 let winnings = self.pot;
                 self.pot = 0;
                 self.phase = "waiting".to_string();
