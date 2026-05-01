@@ -8,6 +8,7 @@
 //! - Permission levels (Greenhorn → Architect)
 
 pub mod agent;
+pub mod sonar_vision;
 pub mod room;
 pub mod gauge;
 pub mod combat;

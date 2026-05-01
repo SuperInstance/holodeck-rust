@@ -1,5 +1,7 @@
 # Holodeck Rust v0.3
 
+🦐 **Cocapn fleet — lighthouse keeper architecture**
+
 > The most advanced holodeck implementation in the Cocapn fleet. Pure Rust, zero unsafe code.
 
 ## What It Is
