@@ -395,7 +395,7 @@ impl Agent {
         lines.join("\n")
     }
 
-    fn cmd_map(&self, rooms: &RoomGraph) -> String {
+    fn cmd_map(&self, _rooms: &RoomGraph) -> String {
         let mut lines = vec!["\x1b[1mShip Map\x1b[0m".to_string()];
         lines.push("".to_string());
         

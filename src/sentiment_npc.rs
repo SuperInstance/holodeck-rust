@@ -10,6 +10,7 @@ use crate::plato_bridge::{PlatoBridge, RoomSentiment};
 
 /// NPC personality adjustments based on room sentiment.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SentimentPersona {
     pub mood_prefix: String,      // Added to NPC dialogue
     pub action_bias: String,      // What the NPC suggests
@@ -17,6 +18,7 @@ pub struct SentimentPersona {
     pub hint_level: f64,          // How much info the NPC reveals (0-1)
 }
 
+#[allow(dead_code)]
 impl SentimentPersona {
     /// Generate persona adjustments based on room sentiment.
     pub fn from_sentiment(sentiment: &RoomSentiment) -> Self {
@@ -112,6 +114,7 @@ impl SentimentPersona {
 }
 
 /// Integrate sentiment into NPC dialogue generation.
+#[allow(dead_code)]
 pub fn build_sentiment_aware_request(
     npc: &crate::npc::NpcConfig,
     player_name: &str,

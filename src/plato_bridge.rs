@@ -5,8 +5,6 @@
 //! The bridge runs in the background, watching room activity and
 //! feeding it to plato-torch's statistical models.
 
-use crate::room::Room;
-use crate::gauge::Gauge;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -258,6 +256,7 @@ impl PlatoBridge {
         self.sentiments.get(room_id)
     }
 
+    #[allow(dead_code)]
     pub fn get_bias(&self, room_id: &str) -> BiasConfig {
         self.sentiments.get(room_id)
             .map(|s| s.bias())
@@ -288,6 +287,7 @@ impl PlatoBridge {
         self.tiles.clear();
     }
 
+    #[allow(dead_code)]
     pub fn export_jepa_context(&self) -> HashMap<String, [f64; 6]> {
         self.sentiments.iter()
             .map(|(k, v)| (k.clone(), v.to_jepa_vector()))
