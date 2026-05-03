@@ -1,6 +1,6 @@
 [package]
 name = "holodeck-rust"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "GPU-accelerated simulation environment for Cocapn fleet. Sentiment-aware NPCs, S1-3 tile format, DEADBAND protocol."
 license = "MIT"
